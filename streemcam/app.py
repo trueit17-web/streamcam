@@ -103,9 +103,13 @@ async def run(cfg: Config) -> None:
     if tuya is not None:
         from .web.internal import create_internal_app
         host, port = parse_listen(cfg.internal_listen)
-        internal = uvicorn.Server(uvicorn.Config(create_internal_app(catalog, tuya, cfg.internal_key),
-                                                 host=host, port=port, log_level="warning"))
-        background.append(asyncio.create_task(supervise("internal-api", internal.serve)))
+
+        async def serve_internal() -> None:
+            server = uvicorn.Server(uvicorn.Config(create_internal_app(catalog, tuya, cfg.internal_key),
+                                                    host=host, port=port, log_level="warning"))
+            await server.serve()
+
+        background.append(asyncio.create_task(supervise("internal-api", serve_internal)))
         background.append(asyncio.create_task(supervise("tuya", tuya.run)))
     else:
         background.append(asyncio.create_task(supervise("go2rtc-sync", lambda: sync_forever(sync, 600))))
