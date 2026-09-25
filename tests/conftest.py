@@ -95,11 +95,11 @@ def _go2rtc_http(request: httpx.Request) -> httpx.Response:
 
 @pytest.fixture
 def make_web():
-    def make(cfg):
+    def make(cfg, upstream_connect=fake_connect):
         registry = StreamRegistry(cfg.max_streams_per_user)
         access = Access(cfg, Store(":memory:"), registry)
         http = httpx.AsyncClient(base_url="http://go2rtc", transport=httpx.MockTransport(_go2rtc_http))
-        app = create_app(cfg, access, StubMonitor(), registry, http, upstream_connect=fake_connect)
+        app = create_app(cfg, access, StubMonitor(), registry, http, upstream_connect=upstream_connect)
         return SimpleNamespace(app=app, access=access, registry=registry)
     return make
 

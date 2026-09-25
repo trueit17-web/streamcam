@@ -31,7 +31,15 @@ def default_upstream(go2rtc_url: str):
     return connect
 
 
-async def _pump(ws: WebSocket, upstream, kicked: asyncio.Event) -> None:
+async def _pump(ws: WebSocket, upstream, kicked: asyncio.Event) -> bool:
+    """Relay messages between the client and go2rtc until either side ends.
+
+    Returns True iff go2rtc caused the end (an error, or its stream closing) —
+    the caller then closes the client socket with 1011. A kick always takes
+    precedence over that (checked by the caller via `kicked.is_set()`), and
+    client-side endings (disconnect, or an error sending to the client) are
+    never reported as a go2rtc error.
+    """
     async def client_to_upstream():
         while True:
             msg = await ws.receive()
@@ -48,15 +56,23 @@ async def _pump(ws: WebSocket, upstream, kicked: asyncio.Event) -> None:
                 await ws.send_bytes(msg)
             else:
                 await ws.send_text(msg)
+        # go2rtc ended the stream without an error — still a go2rtc-caused end.
+        raise UpstreamError("go2rtc closed the stream")
 
-    tasks = [asyncio.create_task(client_to_upstream()),
-             asyncio.create_task(upstream_to_client()),
-             asyncio.create_task(kicked.wait())]
+    client_task = asyncio.create_task(client_to_upstream())
+    upstream_task = asyncio.create_task(upstream_to_client())
+    kicked_task = asyncio.create_task(kicked.wait())
+    tasks = [client_task, upstream_task, kicked_task]
     try:
-        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for t in done:
-            if not t.cancelled() and t.exception() is not None:
-                log.debug("stream pump ended: %r", t.exception())
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        if kicked.is_set():
+            return False
+        if upstream_task.done() and not upstream_task.cancelled() and upstream_task.exception() is not None:
+            log.debug("upstream stream ended: %r", upstream_task.exception())
+            return True
+        if client_task.done() and not client_task.cancelled() and client_task.exception() is not None:
+            log.debug("client stream ended: %r", client_task.exception())
+        return False
     finally:
         for t in tasks:
             t.cancel()
@@ -169,14 +185,15 @@ def create_app(cfg: Config, access: Access, monitor, registry: StreamRegistry,
         try:
             await ws.accept()
             async with upstream_connect(src) as upstream:
-                await _pump(ws, upstream, kicked)
-            if kicked.is_set():
-                close_code = 4403
+                if await _pump(ws, upstream, kicked):
+                    close_code = 1011
         except (WebSocketDisconnect, UpstreamError, OSError) as e:
             log.info("stream %s for %s ended: %r", src, ident, e)
             close_code = 1011
         finally:
             registry.release(ident, closer)
+        if kicked.is_set():
+            close_code = 4403  # kick always takes precedence
         with contextlib.suppress(Exception):
             await ws.close(code=close_code)
 

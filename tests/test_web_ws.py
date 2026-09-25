@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -5,6 +8,36 @@ from starlette.websockets import WebSocketDisconnect
 from streemcam.identity import Identity
 
 USER = Identity("tg", 42)
+
+
+class _SentThenFail:
+    """Upstream stub: echoes nothing, waits for one client message, then ends.
+
+    Subclasses choose how the async iteration ends after that message: with an
+    exception (simulating go2rtc dropping the connection) or by simply
+    exhausting the iterator (simulating go2rtc closing the stream cleanly).
+    """
+
+    def __init__(self):
+        self.sent = asyncio.Event()
+
+    async def send(self, message):
+        self.sent.set()
+
+    def __aiter__(self):
+        return self
+
+
+class _RaisingUpstream(_SentThenFail):
+    async def __anext__(self):
+        await self.sent.wait()
+        raise ConnectionResetError("go2rtc gone")
+
+
+class _EndingUpstream(_SentThenFail):
+    async def __anext__(self):
+        await self.sent.wait()
+        raise StopAsyncIteration
 
 
 def ws_url(web, src="yard", ident=USER):
@@ -59,6 +92,36 @@ def test_stream_limit(make_web, make_cfg):
                 with client.websocket_connect(ws_url(web, src="gate")):
                     pass
             assert e.value.code == 4429
+
+
+def test_upstream_error_mid_stream_closes_1011(make_web, cfg):
+    @asynccontextmanager
+    async def raising_connect(src):
+        yield _RaisingUpstream()
+
+    web = make_web(cfg, upstream_connect=raising_connect)
+    with TestClient(web.app) as client:
+        with pytest.raises(WebSocketDisconnect) as e:
+            with client.websocket_connect(ws_url(web)) as ws:
+                ws.send_text("x")
+                ws.receive_text()
+        assert e.value.code == 1011
+    assert web.registry.count(USER) == 0
+
+
+def test_upstream_ending_closes_1011(make_web, cfg):
+    @asynccontextmanager
+    async def ending_connect(src):
+        yield _EndingUpstream()
+
+    web = make_web(cfg, upstream_connect=ending_connect)
+    with TestClient(web.app) as client:
+        with pytest.raises(WebSocketDisconnect) as e:
+            with client.websocket_connect(ws_url(web)) as ws:
+                ws.send_text("x")
+                ws.receive_text()
+        assert e.value.code == 1011
+    assert web.registry.count(USER) == 0
 
 
 def test_deny_kicks_open_stream(web):
