@@ -1,0 +1,168 @@
+import asyncio
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from streemcam.catalog import Catalog
+from streemcam.recording.recorder import Recorder, RecTarget, backoff, ffmpeg_args, targets
+from streemcam.tuya.models import TuyaCamera
+
+
+class FakeStdin:
+    def __init__(self, proc):
+        self.proc = proc
+        self.data = b""
+
+    def write(self, b):
+        self.data += b
+        if b == b"q\n" and self.proc.graceful:
+            self.proc.returncode = 0
+
+    async def drain(self):
+        pass
+
+
+class FakeProc:
+    def __init__(self, graceful=True):
+        self.returncode = None
+        self.graceful = graceful
+        self.stdin = FakeStdin(self)
+        self.terminated = self.killed = False
+
+    async def wait(self):
+        while self.returncode is None:
+            await asyncio.sleep(0.001)
+        return self.returncode
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = -15
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+
+class Env:
+    def __init__(self, cfg, catalog):
+        self.calls = []
+        self.procs = []
+        self.alerts = []
+        self.wall = datetime(2026, 9, 25, 5, 0, tzinfo=timezone.utc)  # 08:00 MSK
+        self.mono = 1000.0
+
+        async def spawn(*args, **kwargs):
+            self.calls.append((args, kwargs))
+            p = FakeProc()
+            self.procs.append(p)
+            return p
+
+        async def on_alert(text):
+            self.alerts.append(text)
+
+        self.rec = Recorder(cfg, catalog, spawn=spawn, now=lambda: self.wall,
+                            clock=lambda: self.mono, on_alert=on_alert)
+
+
+@pytest.fixture
+def rcfg(make_cfg, tmp_path):
+    return make_cfg(recording={"enabled": True, "path": str(tmp_path), "rtsp_url": "rtsp://go2rtc:8554"})
+
+
+def test_backoff():
+    assert [backoff(n) for n in (1, 2, 3, 4, 5, 6)] == [5, 10, 20, 40, 60, 60]
+
+
+def test_ffmpeg_args(tmp_path):
+    args = ffmpeg_args("rtsp://go2rtc:8554/room~rec", tmp_path / "room")
+    assert args[0] == "ffmpeg"
+    assert args[args.index("-i") + 1] == "rtsp://go2rtc:8554/room~rec"
+    joined = " ".join(args)
+    for part in ["-rtsp_transport tcp", "-c:v libx264", "-preset veryfast", "-crf 28", "-g 50",
+                 "-c:a aac", "-b:a 64k", "-f segment", "-segment_time 3600", "-segment_atclocktime 1",
+                 "-reset_timestamps 1", "-strftime 1", "-segment_format mp4",
+                 "-segment_format_options movflags=+frag_keyframe+empty_moov+default_base_moof",
+                 "-map 0:v:0", "-map 0:a:0?"]:
+        assert part in joined
+    assert args[-1] == str(tmp_path / "room" / "%Y-%m-%d" / "%H-%M-%S.mp4")
+
+
+def test_targets(rcfg):
+    catalog = Catalog(rcfg)
+    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    ts = {t.cam_id: t for t in targets(rcfg, catalog)}
+    assert ts["yard"] == RecTarget("yard", "Двор", "rtsp://go2rtc:8554/yard")
+    assert ts["gate"].input_url == "rtsp://go2rtc:8554/gate~rec"
+    assert ts["room"].input_url == "rtsp://go2rtc:8554/room~rec"
+    assert ts["tuya_bf1"].input_url == "rtsp://go2rtc:8554/tuya_bf1"
+
+
+async def test_starts_in_window_creates_dirs_and_stops_outside(rcfg, tmp_path):
+    env = Env(rcfg, Catalog(rcfg))
+    await env.rec.tick()
+    assert len(env.calls) == 3
+    args, kwargs = env.calls[0]
+    assert kwargs["env"]["TZ"] == "Europe/Moscow"
+    assert kwargs["stdin"] == asyncio.subprocess.PIPE
+    assert (tmp_path / "yard" / "2026-09-25").is_dir()
+    assert (tmp_path / "yard" / "2026-09-26").is_dir()
+    assert env.rec.active_cams() == {"yard", "gate", "room"}
+
+    await env.rec.tick()
+    assert len(env.calls) == 3  # уже запущены — повторно не стартуем
+
+    env.wall = datetime(2026, 9, 25, 16, 0, tzinfo=timezone.utc)  # 19:00 MSK
+    await env.rec.tick()
+    assert all(p.stdin.data == b"q\n" and p.returncode == 0 for p in env.procs)
+    assert env.rec.active_cams() == set()
+
+
+async def test_outside_window_nothing_starts(rcfg):
+    env = Env(rcfg, Catalog(rcfg))
+    env.wall = datetime(2026, 9, 25, 4, 0, tzinfo=timezone.utc)  # 07:00 MSK
+    await env.rec.tick()
+    assert env.calls == []
+
+
+async def test_restart_with_backoff(make_cfg, tmp_path):
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path)},
+                   cameras=[{"id": "yard", "name": "Двор", "type": "rtsp", "url": "rtsp://x"}])
+    env = Env(cfg, Catalog(cfg))
+    await env.rec.tick()
+    env.procs[0].returncode = 1         # упал
+    await env.rec.tick()
+    assert len(env.calls) == 1          # пауза 5 с ещё не прошла
+    env.mono += 5
+    await env.rec.tick()
+    assert len(env.calls) == 2
+
+
+async def test_alert_after_minutes_and_recovery(make_cfg, tmp_path):
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path), "alert_minutes": 10},
+                   cameras=[{"id": "yard", "name": "Двор", "type": "rtsp", "url": "rtsp://x"}])
+    env = Env(cfg, Catalog(cfg))
+    await env.rec.tick()
+    for _ in range(12):                 # падает каждую минуту 12 минут
+        env.procs[-1].returncode = 1
+        env.mono += 60
+        await env.rec.tick()
+    assert len(env.alerts) == 1 and "Двор" in env.alerts[0]
+    env.mono += 61                      # процесс живёт > 60 с — здоров
+    await env.rec.tick()
+    assert len(env.alerts) == 2 and "возобновилась" in env.alerts[1]
+
+
+async def test_stop_escalates_to_terminate(rcfg, monkeypatch):
+    import streemcam.recording.recorder as mod
+    monkeypatch.setattr(mod, "STOP_WAIT_SECONDS", 0.01)
+    env = Env(rcfg, Catalog(rcfg))
+    await env.rec.tick()
+    for p in env.procs:
+        p.graceful = False
+    await env.rec.stop_all()
+    assert all(p.terminated for p in env.procs)
+
+
+def test_available(rcfg):
+    assert Recorder(rcfg, Catalog(rcfg), ffmpeg="definitely-not-ffmpeg-xyz").available() is False
