@@ -2,11 +2,13 @@ import os
 import re
 from pathlib import Path
 from typing import Annotated, Literal, Union
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 CAMERA_ID = r"^[a-z0-9_-]+$"
+HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 INTERNAL_KEY = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 _ENV_RE = re.compile(r"\$\{(\w+)(?::-([^}]*))?\}")
 
@@ -20,6 +22,7 @@ class RtspCamera(BaseModel):
     id: str = Field(pattern=CAMERA_ID)
     name: str
     url: str  # любой источник go2rtc: rtsp://, ffmpeg:..., и т.д.
+    record: bool = True
 
 
 class DahuaCamera(BaseModel):
@@ -32,6 +35,7 @@ class DahuaCamera(BaseModel):
     password: str
     channel: int = 1
     subtype: Literal[0, 1] = 0
+    record: bool = True
 
 
 class XiaomiCamera(BaseModel):
@@ -44,6 +48,8 @@ class XiaomiCamera(BaseModel):
     did: str
     model: str
     subtype: int | None = None
+    record: bool = True
+    record_subtype: int = 1
 
 
 Camera = Annotated[Union[RtspCamera, DahuaCamera, XiaomiCamera], Field(discriminator="type")]
@@ -81,6 +87,46 @@ class TuyaConfig(BaseModel):
     snapshot_minutes: int = 15
 
 
+class RecordingConfig(BaseModel):
+    enabled: bool = False
+    timezone: str = "Europe/Moscow"
+    start: str = "08:00"
+    end: str = "19:00"
+    retention_days: int = 14
+    min_free_gb: int = 15
+    path: str = "recordings"
+    rtsp_url: str = "rtsp://127.0.0.1:8554"
+    tuya: bool = True
+    alert_minutes: int = 10
+
+    @field_validator("start", "end")
+    @classmethod
+    def _hhmm(cls, v: str) -> str:
+        if not HHMM.match(v):
+            raise ValueError("recording time must be HH:MM")
+        return v
+
+    @field_validator("timezone")
+    @classmethod
+    def _tz(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError(f"recording timezone not found: {v}") from None
+        return v
+
+    @field_validator("rtsp_url")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.rstrip("/")
+
+    @model_validator(mode="after")
+    def _order(self):
+        if self.start >= self.end:
+            raise ValueError("recording start must be earlier than end")
+        return self
+
+
 class Config(BaseModel):
     public_url: str
     secret: str = Field(min_length=16)
@@ -113,6 +159,7 @@ class Config(BaseModel):
     internal_url: str = "http://127.0.0.1:8081"
     internal_key: str | None = None
     tuya: TuyaConfig = TuyaConfig()
+    recording: RecordingConfig = RecordingConfig()
     telegram: TelegramConfig = TelegramConfig()
     discord: DiscordConfig = DiscordConfig()
     admins: UserLists = UserLists()

@@ -117,3 +117,25 @@ def test_config_camera_id_cannot_start_with_tuya(make_cfg, base_data):
     cams[0]["id"] = "tuya_abc"
     with pytest.raises(ConfigError, match="tuya_"):
         make_cfg(cameras=cams)
+
+
+def test_recording_defaults(cfg):
+    r = cfg.recording
+    assert (r.enabled, r.timezone, r.start, r.end) == (False, "Europe/Moscow", "08:00", "19:00")
+    assert (r.retention_days, r.min_free_gb, r.path) == (14, 15, "recordings")
+    assert (r.rtsp_url, r.tuya, r.alert_minutes) == ("rtsp://127.0.0.1:8554", True, 10)
+    assert all(c.record for c in cfg.cameras)
+    assert cfg.camera("room").record_subtype == 1
+
+
+@pytest.mark.parametrize("rec", [
+    {"start": "8:00"}, {"end": "25:00"}, {"start": "19:00", "end": "08:00"},
+    {"start": "08:00", "end": "08:00"}, {"timezone": "Mars/Olympus"},
+])
+def test_recording_validation(make_cfg, rec):
+    with pytest.raises(ConfigError, match="recording"):
+        make_cfg(recording=rec)
+
+
+def test_rtsp_url_trailing_slash(make_cfg):
+    assert make_cfg(recording={"rtsp_url": "rtsp://go2rtc:8554/"}).recording.rtsp_url == "rtsp://go2rtc:8554"
