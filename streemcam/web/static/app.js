@@ -131,7 +131,7 @@ function renderList() {
   list.hidden = false;
   $("#back").hidden = true;
   $("#grid").hidden = info.cameras.length < 2;
-  $("#title").textContent = "Камеры";
+  $("#title").textContent = archiveMode ? "Архив" : "Камеры";
   $("#mode-archive").hidden = !info.recording;
   if (archiveMode) $("#grid").hidden = true;
 }
@@ -289,10 +289,13 @@ async function openArchive(cam) {
   if (days.length) openDay(cam, days[0]);
 }
 
+let openDayRequestId = 0;
+
 async function openDay(cam, day) {
   for (const b of $("#archive-days").children) b.classList.toggle("active", b.textContent === day);
+  const requestId = ++openDayRequestId;
   const hours = await loadArchiveJson(`${encodeURIComponent(cam.id)}/${encodeURIComponent(day)}`, "hours");
-  if (hours === null) return;
+  if (hours === null || requestId !== openDayRequestId) return;
   $("#archive-hours").replaceChildren(...hours.map((h) => {
     const label = `${h.name.slice(0, 2)}:${h.name.slice(3, 5)}${h.recording ? " •" : ""} · ${(h.size / 1e6).toFixed(0)} МБ`;
     return chip(label, (ev) => playHour(cam, day, h, ev.currentTarget));
