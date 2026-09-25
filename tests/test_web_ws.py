@@ -1,4 +1,5 @@
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 import pytest
@@ -8,6 +9,28 @@ from starlette.websockets import WebSocketDisconnect
 from streemcam.identity import Identity
 
 USER = Identity("tg", 42)
+
+
+def _close_and_wait_released(client, web, ws, ident=USER, timeout=2.0):
+    """Close the socket and wait until the server has released its stream slot.
+
+    Works around a Starlette TestClient race: leaving `websocket_connect(...)`
+    sends a close frame and then *immediately* cancels the app task's scope and
+    waits on its future, without waiting for our handler to actually finish
+    running. If the handler (still inside `registry.release`/its final
+    `ws.close`) hasn't reached the post-app `sleep_forever` yet when that
+    cancel fires, `fut.result()` raises a stray `concurrent.futures.
+    CancelledError` out of the `with` block — intermittently, since it's a
+    timing race. Closing explicitly and polling for the registry to actually
+    drop the slot ensures the handler has already returned normally before we
+    let the context manager's own close/cancel run.
+    """
+    ws.close()
+    deadline = time.monotonic() + timeout
+    while web.registry.count(ident) != 0:
+        if time.monotonic() > deadline:
+            raise AssertionError(f"stream for {ident} was not released within {timeout}s")
+        client.portal.call(asyncio.sleep, 0.01)
 
 
 class _SentThenFail:
@@ -51,6 +74,7 @@ def test_proxies_text_and_bytes(web):
             assert ws.receive_text() == 'echo:{"type":"mse"}'
             ws.send_bytes(b"\x00\x01")
             assert ws.receive_bytes() == b"\x00\x01"
+            _close_and_wait_released(client, web, ws)
 
 
 def test_releases_stream_after_disconnect(web):
@@ -59,6 +83,7 @@ def test_releases_stream_after_disconnect(web):
             ws.send_text("x")
             ws.receive_text()
             assert web.registry.count(USER) == 1
+            _close_and_wait_released(client, web, ws)
         assert web.registry.count(USER) == 0
 
 
@@ -92,6 +117,7 @@ def test_stream_limit(make_web, make_cfg):
                 with client.websocket_connect(ws_url(web, src="gate")):
                     pass
             assert e.value.code == 4429
+            _close_and_wait_released(client, web, ws)
 
 
 def test_upstream_error_mid_stream_closes_1011(make_web, cfg):
@@ -133,3 +159,4 @@ def test_deny_kicks_open_stream(web):
             with pytest.raises(WebSocketDisconnect) as e:
                 ws.receive_text()
             assert e.value.code == 4403
+            _close_and_wait_released(client, web, ws)
