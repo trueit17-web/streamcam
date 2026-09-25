@@ -1,11 +1,13 @@
 import asyncio
 import contextlib
 import logging
+from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
 from websockets.asyncio.client import connect as ws_connect
@@ -21,6 +23,7 @@ from ..tokens import TokenError
 log = logging.getLogger(__name__)
 
 GO2RTC_JS = {"video-rtc.js", "video-stream.js"}
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def default_upstream(go2rtc_url: str):
@@ -196,5 +199,11 @@ def create_app(cfg: Config, access: Access, monitor, registry: StreamRegistry,
             close_code = 4403  # kick always takes precedence
         with contextlib.suppress(Exception):
             await ws.close(code=close_code)
+
+    @app.get("/")
+    async def index():
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app
