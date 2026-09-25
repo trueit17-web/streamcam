@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 TICK_SECONDS = 5
 HEALTHY_AFTER_SECONDS = 60
 STALL_SECONDS = 180
+FRESH_SECONDS = 30
 STOP_WAIT_SECONDS = 10.0
 
 
@@ -26,7 +27,7 @@ def backoff(failures: int) -> float:
 
 def ffmpeg_args(input_url: str, out_dir: Path, ffmpeg: str = "ffmpeg") -> list[str]:
     return [
-        ffmpeg, "-hide_banner", "-loglevel", "warning", "-y",  # без -nostdin: stdin нужен для мягкой остановки "q"
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",  # без -nostdin: stdin нужен для мягкой остановки "q"
         "-rtsp_transport", "tcp", "-timeout", "10000000", "-i", input_url,
         "-map", "0:v:0", "-map", "0:a:0?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-g", "50",
@@ -48,6 +49,8 @@ class RecTarget:
 def targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
     result = []
     for cam in catalog.all():
+        if cam.kind == "tuya" and cam.online is False:
+            continue
         stream = rec_stream_name(cfg, cam)
         if stream is not None:
             result.append(RecTarget(cam.id, cam.name, f"{cfg.recording.rtsp_url}/{stream}"))
@@ -146,11 +149,7 @@ class Recorder:
                                     stdout=asyncio.subprocess.DEVNULL, env=env)
         st.started_at = mono
 
-    def _is_stalled(self, st: _State, mono: float, wall: datetime) -> bool:
-        if st.proc is None or st.proc.returncode is not None:
-            return False
-        if mono - st.started_at < STALL_SECONDS:
-            return False
+    def _newest_mtime(self, st: _State, wall: datetime) -> float | None:
         local = local_now(wall, self.cfg.recording)
         today_dir = self._root / st.target.cam_id / local.strftime("%Y-%m-%d")
         newest_mtime = None
@@ -162,6 +161,14 @@ class Recorder:
                     continue
                 if newest_mtime is None or mt > newest_mtime:
                     newest_mtime = mt
+        return newest_mtime
+
+    def _is_stalled(self, st: _State, mono: float, wall: datetime) -> bool:
+        if st.proc is None or st.proc.returncode is not None:
+            return False
+        if mono - st.started_at < STALL_SECONDS:
+            return False
+        newest_mtime = self._newest_mtime(st, wall)
         if newest_mtime is None:
             return True
         return (self._wall_clock() - newest_mtime) >= STALL_SECONDS
@@ -173,7 +180,11 @@ class Recorder:
             st.proc.terminate()
             return
         running = st.proc is not None and st.proc.returncode is None
+        healthy = False
         if running and mono - st.started_at >= HEALTHY_AFTER_SECONDS:
+            newest_mtime = self._newest_mtime(st, wall)
+            healthy = newest_mtime is not None and (self._wall_clock() - newest_mtime) <= FRESH_SECONDS
+        if healthy:
             st.failures = 0
             st.down_since = None
             if st.alerted:

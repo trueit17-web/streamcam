@@ -81,6 +81,7 @@ def test_ffmpeg_args(tmp_path):
     assert args[0] == "ffmpeg"
     assert args[args.index("-i") + 1] == "rtsp://go2rtc:8554/room~rec"
     assert args[args.index("-i") - 2:args.index("-i")] == ["-timeout", "10000000"]
+    assert args[args.index("-loglevel") + 1] == "error"
     joined = " ".join(args)
     for part in ["-rtsp_transport tcp", "-timeout 10000000", "-c:v libx264", "-preset veryfast",
                  "-crf 28", "-g 50",
@@ -100,6 +101,14 @@ def test_targets(rcfg):
     assert ts["gate"].input_url == "rtsp://go2rtc:8554/gate~rec"
     assert ts["room"].input_url == "rtsp://go2rtc:8554/room~rec"
     assert ts["tuya_bf1"].input_url == "rtsp://go2rtc:8554/tuya_bf1"
+
+
+def test_targets_skips_offline_tuya_cameras(rcfg):
+    catalog = Catalog(rcfg)
+    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True), TuyaCamera("bf2", "Кухня", False)])
+    ts = {t.cam_id: t for t in targets(rcfg, catalog)}
+    assert "tuya_bf1" in ts
+    assert "tuya_bf2" not in ts
 
 
 async def test_starts_in_window_creates_dirs_and_stops_outside(rcfg, tmp_path):
@@ -152,9 +161,42 @@ async def test_alert_after_minutes_and_recovery(make_cfg, tmp_path):
         env.mono += 60
         await env.rec.tick()
     assert len(env.alerts) == 1 and "Двор" in env.alerts[0]
+    # свежий сегмент в папке дня — иначе процесс "жив, но не пишет" и не считается здоровым
+    day_dir = tmp_path / "yard" / "2026-09-25"
+    fresh = day_dir / "08-00-00.mp4"
+    fresh.write_bytes(b"data")
+    os.utime(fresh, (env.wallclock, env.wallclock))
     env.mono += 61                      # процесс живёт > 60 с — здоров
     await env.rec.tick()
     assert len(env.alerts) == 2 and "возобновилась" in env.alerts[1]
+
+
+async def test_running_without_fresh_file_alerts_once_despite_stall_restarts(make_cfg, tmp_path):
+    """Процесс работает (не падает сам), но никогда не пишет файл — watchdog периодически
+    его перезапускает (terminate), но т.к. свежего сегмента так и нет, здоровье не
+    восстанавливается: down_since не сбрасывается, и уведомление уходит ровно один раз."""
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path), "alert_minutes": 10},
+                   cameras=[{"id": "yard", "name": "Двор", "type": "rtsp", "url": "rtsp://x"}])
+    env = Env(cfg, Catalog(cfg))
+    await env.rec.tick()
+    for _ in range(20):
+        env.mono += 61
+        env.wallclock += 61
+        await env.rec.tick()
+    assert len(env.alerts) == 1
+    assert "не идёт" in env.alerts[0]
+
+
+async def test_stall_watchdog_terminates_on_stale_file(rcfg, tmp_path):
+    env = Env(rcfg, Catalog(rcfg))
+    await env.rec.tick()
+    day_dir = tmp_path / "yard" / "2026-09-25"
+    stale_file = day_dir / "08-00-00.mp4"
+    stale_file.write_bytes(b"data")
+    os.utime(stale_file, (env.wallclock - 200, env.wallclock - 200))  # старше STALL_SECONDS (180)
+    env.mono += 181
+    await env.rec.tick()
+    assert env.procs[0].terminated is True
 
 
 async def test_stop_escalates_to_terminate(rcfg, monkeypatch):
