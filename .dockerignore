@@ -1,0 +1,7 @@
+.venv
+.git
+data
+go2rtc
+tests
+config.yaml
+.env
