@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .catalog import Catalog
+from .catalog import CameraInfo, Catalog
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ class _State:
     offline_since: float | None = None
     alerted: bool = False
     snapshot: bytes | None = None
+    snapshot_at: float | None = None
 
 
 class CameraMonitor:
@@ -43,15 +44,18 @@ class CameraMonitor:
         state = self._state.get(cam_id)
         return state.snapshot if state else None
 
-    async def probe(self, cam_id: str) -> None:
-        state = self._st(cam_id)
-        image = None
+    async def _fetch_frame(self, cam_id: str) -> bytes | None:
         try:
             r = await self._http.get("/api/frame.jpeg", params={"src": cam_id}, timeout=20)
             if r.status_code == 200 and r.content:
-                image = r.content
+                return r.content
         except httpx.HTTPError as e:
             log.debug("probe %s failed: %s", cam_id, e)
+        return None
+
+    async def probe(self, cam_id: str) -> None:
+        state = self._st(cam_id)
+        image = await self._fetch_frame(cam_id)
 
         now = self._clock()
         if image is not None:
@@ -72,8 +76,27 @@ class CameraMonitor:
             state.alerted = True
             await self._alert(cam_id, False)
 
+    async def _check_tuya(self, cam: CameraInfo) -> None:
+        state = self._st(cam.id)
+        state.online = cam.online
+        if not cam.online:
+            return
+        now = self._clock()
+        if state.snapshot_at is not None and now - state.snapshot_at < self.cfg.tuya.snapshot_minutes * 60:
+            return
+        image = await self._fetch_frame(cam.id)
+        if image is not None:
+            state.snapshot = image
+            state.snapshot_at = now
+
+    async def _check(self, cam: CameraInfo) -> None:
+        if cam.kind == "tuya":
+            await self._check_tuya(cam)
+        else:
+            await self.probe(cam.id)
+
     async def probe_all(self) -> None:
-        await asyncio.gather(*(self.probe(cam.id) for cam in self.catalog.all()))
+        await asyncio.gather(*(self._check(cam) for cam in self.catalog.all()))
 
     async def run(self) -> None:
         while True:

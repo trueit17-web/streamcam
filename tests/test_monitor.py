@@ -87,10 +87,32 @@ async def test_snapshot_kept_while_offline(cfg, alerts):
     assert m.snapshot("yard") == b"JPEG-yard"
 
 
-async def test_probe_all_follows_catalog(cfg, alerts):
+async def test_tuya_status_from_cloud_and_rare_snapshots(cfg, alerts):
+    from streemcam.catalog import Catalog
     from streemcam.tuya.models import TuyaCamera
+    requested = []
+
+    def handler(request):
+        requested.append(request.url.params["src"])
+        return httpx.Response(200, content=b"JPEG")
+    http = httpx.AsyncClient(base_url="http://go2rtc", transport=httpx.MockTransport(handler))
     catalog = Catalog(cfg)
-    m = CameraMonitor(cfg, catalog, client({"tuya_bf1": True}), None, clock=Clock())
-    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    clock = Clock()
+    m = CameraMonitor(cfg, catalog, http, None, clock=clock)
+    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True), TuyaCamera("bf2", "Гараж", False)])
+
     await m.probe_all()
-    assert m.snapshot("tuya_bf1") == b"JPEG-tuya_bf1"
+    assert m.is_online("tuya_bf1") is True and m.is_online("tuya_bf2") is False
+    assert requested.count("tuya_bf1") == 1 and "tuya_bf2" not in requested
+    assert m.snapshot("tuya_bf1") == b"JPEG"
+
+    clock.t = 14 * 60
+    await m.probe_all()
+    assert requested.count("tuya_bf1") == 1  # ещё рано
+    clock.t = 15 * 60
+    await m.probe_all()
+    assert requested.count("tuya_bf1") == 2
+
+    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", False)])
+    await m.probe_all()
+    assert m.is_online("tuya_bf1") is False
