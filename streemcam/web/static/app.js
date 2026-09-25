@@ -12,7 +12,19 @@ function load(key) {
   try { return sessionStorage.getItem(key); } catch { return null; }
 }
 
+// go2rtc закрывает WebSocket video-stream'а только через 5с после отсоединения
+// от DOM (DISCONNECT_TIMEOUT), а сам video-rtc переподключается через 15с.
+// Если сразу открыть новую камеру, старое соединение ещё живо и может упереться
+// в лимит max_streams_per_user. Поэтому перед заменой #viewer явно отключаем
+// все текущие плееры.
+function stopPlayers() {
+  for (const el of document.querySelectorAll("#viewer video-stream")) {
+    el.ondisconnect?.();
+  }
+}
+
 function showMessage(text) {
+  stopPlayers();
   $("#message").textContent = text;
   $("#message").hidden = false;
   $("#cams").hidden = true;
@@ -87,6 +99,7 @@ function statusText(online) {
 }
 
 function renderList() {
+  stopPlayers();
   const list = $("#cams");
   list.replaceChildren(...info.cameras.map((cam) => {
     const li = document.createElement("li");
@@ -138,6 +151,7 @@ function player(cam) {
 }
 
 function openCameras(cams) {
+  stopPlayers();
   const viewer = $("#viewer");
   viewer.className = cams.length > 1 ? "grid" : "single";
   viewer.replaceChildren(...cams.map(player));
@@ -149,7 +163,7 @@ function openCameras(cams) {
   if (cams.length === 1) history.replaceState(null, "", `#cam=${cams[0].id}`);
 }
 
-$("#back").onclick = () => { history.replaceState(null, "", location.pathname); renderList(); };
+$("#back").onclick = () => { stopPlayers(); history.replaceState(null, "", location.pathname); renderList(); };
 $("#grid").onclick = () => openCameras(info.cameras.slice(0, info.max_streams));
 
 async function main() {
