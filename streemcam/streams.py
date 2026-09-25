@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 
@@ -32,5 +34,9 @@ class StreamRegistry:
         return len(self._active.get(ident, ()))
 
     async def kick(self, ident: Identity) -> None:
-        for closer in list(self._active.pop(ident, ())):
-            await closer()
+        closers = list(self._active.pop(ident, ()))
+        results = await asyncio.gather(*(c() for c in closers), return_exceptions=True)
+        logger = logging.getLogger(__name__)
+        for closer, result in zip(closers, results):
+            if isinstance(result, Exception):
+                logger.warning(f"Failed to close stream for {ident}: {result!r}")
