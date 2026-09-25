@@ -71,3 +71,30 @@ def test_disabled_archive(web):
 
 def test_cameras_recording_flag(aweb):
     assert TestClient(aweb.app).get("/api/cameras", headers=h(aweb)).json()["recording"] is True
+
+
+def test_download_survives_file_growing_during_streaming(aweb, monkeypatch):
+    """Starlette FileResponse without Range reads to EOF past the Content-Length taken from
+    stat() -> uvicorn "Response content longer than Content-Length" if the file (ffmpeg segment
+    still being written) grows mid-response. archive_file must stream exactly the size seen at
+    stat() time for requests with no Range header."""
+    real_open = open
+    grown = {"done": False}
+
+    def patched_open(file, *args, **kwargs):
+        f = real_open(file, *args, **kwargs)
+        if not grown["done"] and str(file).endswith("08-00-00.mp4"):
+            grown["done"] = True
+            with real_open(file, "ab") as af:
+                af.write(b"E" * 4096)
+        return f
+
+    monkeypatch.setattr("streemcam.web.server.open", patched_open, raising=False)
+    c = TestClient(aweb.app)
+    r = c.get("/api/archive/yard/2026-09-25/08-00-00.mp4", headers=h(aweb))
+    assert grown["done"] is True
+    assert r.status_code == 200
+    assert len(r.content) == 1024
+    assert r.headers["content-length"] == "1024"
+    assert r.headers["content-type"] == "video/mp4"
+    assert r.headers["accept-ranges"] == "bytes"

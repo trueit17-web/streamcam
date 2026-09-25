@@ -4,9 +4,10 @@ import logging
 from pathlib import Path
 from urllib.parse import urlencode
 
+import anyio
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
@@ -27,6 +28,24 @@ log = logging.getLogger(__name__)
 
 GO2RTC_JS = {"video-rtc.js", "video-stream.js"}
 STATIC_DIR = Path(__file__).parent / "static"
+ARCHIVE_CHUNK_SIZE = 64 * 1024
+
+
+async def _stream_file(path: Path, size: int):
+    """Отдаёт ровно `size` байт файла чанками, даже если файл продолжает расти
+    (ffmpeg дописывает текущий час) — иначе Starlette FileResponse без Range
+    читает до EOF мимо Content-Length, взятого из stat при построении ответа."""
+    f = await anyio.to_thread.run_sync(open, path, "rb")
+    try:
+        remaining = size
+        while remaining > 0:
+            chunk = await anyio.to_thread.run_sync(f.read, min(ARCHIVE_CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+    finally:
+        await anyio.to_thread.run_sync(f.close)
 
 
 def default_upstream(go2rtc_url: str):
@@ -176,15 +195,22 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
                           for e in hours]}
 
     @app.get("/api/archive/{cam_id}/{day}/{name}.mp4")
-    async def archive_file(cam_id: str, day: str, name: str, download: int = 0,
+    async def archive_file(request: Request, cam_id: str, day: str, name: str, download: int = 0,
                            user: Identity = Depends(current_user)):
         path = _archive().file(cam_id, day, name)
         if path is None:
             raise HTTPException(404, "not found")
-        if download:
-            return FileResponse(path, media_type="video/mp4",
-                                filename=f"{cam_id}_{day}_{name}.mp4")
-        return FileResponse(path, media_type="video/mp4")
+        filename = f"{cam_id}_{day}_{name}.mp4" if download else None
+        if request.headers.get("range"):
+            # Bounded read (206) — Starlette's Range handling is safe against growth.
+            if filename:
+                return FileResponse(path, media_type="video/mp4", filename=filename)
+            return FileResponse(path, media_type="video/mp4")
+        size = path.stat().st_size
+        headers = {"Content-Length": str(size), "Accept-Ranges": "bytes"}
+        if filename:
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return StreamingResponse(_stream_file(path, size), media_type="video/mp4", headers=headers)
 
     @app.get("/go2rtc/{name}")
     async def go2rtc_js(name: str):
