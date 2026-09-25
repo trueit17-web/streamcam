@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from streemcam.app import alert_text, make_tg_bot, parse_listen, supervise, sync_forever
+from streemcam.app import alert_text, make_tg_bot, parse_listen, recording_config_warnings, supervise, sync_forever
 from streemcam.catalog import Catalog
 
 
@@ -42,6 +42,24 @@ async def test_supervise_restarts_after_crash():
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def test_recording_config_warnings_flags_relative_path_and_localhost_rtsp(make_cfg, tmp_path):
+    cfg = make_cfg(recording={"enabled": True, "path": "recordings",
+                              "rtsp_url": "rtsp://127.0.0.1:8554"})
+    warnings = recording_config_warnings(cfg)
+    assert any("recording.path" in w for w in warnings)
+    assert any("rtsp_url" in w for w in warnings)
+
+    cfg2 = make_cfg(recording={"enabled": True, "path": str(tmp_path), "rtsp_url": "rtsp://localhost:8554"})
+    warnings2 = recording_config_warnings(cfg2)
+    assert not any("recording.path" in w for w in warnings2)
+    assert any("rtsp_url" in w for w in warnings2)
+
+
+def test_recording_config_warnings_none_when_correct(make_cfg, tmp_path):
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path), "rtsp_url": "rtsp://go2rtc:8554"})
+    assert recording_config_warnings(cfg) == []
 
 
 def test_parse_listen():

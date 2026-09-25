@@ -63,6 +63,21 @@ def alert_text(catalog: Catalog, cfg: Config, cam_id: str, online: bool) -> str:
     return f"⚠️ Камера «{name}» офлайн больше {cfg.offline_alert_minutes} мин."
 
 
+def recording_config_warnings(cfg: Config) -> list[str]:
+    """Спека §Global Constraints: внутри Docker relative path и 127.0.0.1/localhost неверны —
+    файлы не попадут в volume /recordings, а ffmpeg не достучится до go2rtc."""
+    warnings = []
+    if not Path(cfg.recording.path).is_absolute():
+        warnings.append(
+            f"recording.path {cfg.recording.path!r} is not absolute — "
+            "inside Docker recordings will not land in the mounted volume")
+    if "127.0.0.1" in cfg.recording.rtsp_url or "localhost" in cfg.recording.rtsp_url:
+        warnings.append(
+            f"recording.rtsp_url {cfg.recording.rtsp_url!r} points at localhost — "
+            "inside Docker ffmpeg cannot reach go2rtc through it")
+    return warnings
+
+
 def build_access(cfg: Config) -> Access:
     return Access(cfg, Store(cfg.db_path), StreamRegistry(cfg.max_streams_per_user))
 
@@ -110,6 +125,8 @@ async def run(cfg: Config) -> None:
     if cfg.recording.enabled:
         from .recording.archive import Archive
         from .recording.recorder import Recorder
+        for warning in recording_config_warnings(cfg):
+            log.warning(warning)
         archive = Archive(Path(cfg.recording.path), catalog)
         recorder = Recorder(cfg, catalog, on_alert=on_tuya_alert)
 
