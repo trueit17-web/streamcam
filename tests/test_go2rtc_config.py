@@ -1,6 +1,13 @@
 import yaml
 
-from streemcam.go2rtc_config import render, stream_url, write_go2rtc_config
+from streemcam.go2rtc_config import (COMPAT_SUFFIX, compat_name, compat_src, render, stream_url,
+                                     write_go2rtc_config)
+
+
+def test_compat_helpers():
+    assert COMPAT_SUFFIX == "~h264"
+    assert compat_name("room") == "room~h264"
+    assert compat_src("room") == "ffmpeg:room#video=h264#width=1280#audio=aac"
 
 
 def test_stream_urls(cfg):
@@ -21,7 +28,8 @@ def test_xiaomi_subtype(make_cfg, base_data):
 
 def test_render_sets_streams_and_listen(cfg):
     data = render(cfg, None)
-    assert set(data["streams"]) == {"yard", "gate", "room"}
+    assert set(data["streams"]) == {"yard", "gate", "room", "yard~h264", "gate~h264", "room~h264"}
+    assert data["streams"]["yard~h264"] == compat_src("yard")
     assert data["api"]["listen"] == "127.0.0.1:1984"
     assert data["webrtc"]["listen"] == ":8555"
 

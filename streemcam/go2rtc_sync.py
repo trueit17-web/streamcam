@@ -1,20 +1,15 @@
+import asyncio
 import logging
 
 import httpx
+import yaml
 
 from .catalog import Catalog
+from .go2rtc_config import COMPAT_SUFFIX, compat_name, compat_src
 
 log = logging.getLogger(__name__)
 
-COMPAT_SUFFIX = "~h264"
-
-
-def compat_name(cam_id: str) -> str:
-    return cam_id + COMPAT_SUFFIX
-
-
-def compat_src(cam_id: str) -> str:
-    return f"ffmpeg:{cam_id}#video=h264#width=1280#audio=aac"
+__all__ = ["COMPAT_SUFFIX", "compat_name", "compat_src", "tuya_src", "desired_streams", "Go2rtcSync"]
 
 
 def tuya_src(internal_url: str, device_id: str, key: str) -> str:
@@ -24,24 +19,21 @@ def tuya_src(internal_url: str, device_id: str, key: str) -> str:
 
 def desired_streams(catalog: Catalog, internal_url: str, key: str | None) -> dict[str, str]:
     streams: dict[str, str] = {}
+    if not key:
+        return streams
     for cam in catalog.all():
-        if cam.kind == "tuya":
-            if not key:
-                continue
-            streams[cam.id] = tuya_src(internal_url, cam.device_id, key)
-        streams[compat_name(cam.id)] = compat_src(cam.id)
+        if cam.kind != "tuya":
+            continue
+        name = cam.id
+        streams[name] = tuya_src(internal_url, cam.device_id, key)
+        streams[compat_name(name)] = compat_src(name)
     return streams
 
 
-def _managed(name: str) -> bool:
-    return name.startswith("tuya_") or name.endswith(COMPAT_SUFFIX)
-
-
-def _current_src(info) -> str | None:
-    producers = (info or {}).get("producers") or []
-    if producers and isinstance(producers[0], dict):
-        return producers[0].get("url")
-    return None
+def _normalize_src(value) -> str | None:
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
 
 
 class Go2rtcSync:
@@ -50,25 +42,58 @@ class Go2rtcSync:
         self._catalog = catalog
         self._internal_url = internal_url
         self._key = internal_key
+        self._lock = asyncio.Lock()
 
     async def sync(self) -> None:
+        async with self._lock:
+            await self._sync_locked()
+
+    async def _sync_locked(self) -> None:
         desired = desired_streams(self._catalog, self._internal_url, self._key)
         try:
-            r = await self._http.get("/api/streams")
-            current = r.json() if r.status_code == 200 else {}
-        except (httpx.HTTPError, ValueError) as e:
+            r = await self._http.get("/api/config")
+        except httpx.HTTPError as e:
             log.warning("go2rtc sync skipped: %s", e)
             return
-        for name, src in desired.items():
-            if _current_src(current.get(name)) == src:
-                continue
-            try:
-                await self._http.put("/api/streams", params={"name": name, "src": src})
-            except httpx.HTTPError as e:
-                log.warning("go2rtc: cannot register %s: %s", name, e)
-        for name in current:
-            if _managed(name) and name not in desired:
-                try:
-                    await self._http.delete("/api/streams", params={"src": name})
-                except httpx.HTTPError as e:
-                    log.warning("go2rtc: cannot delete %s: %s", name, e)
+        if r.status_code != 200:
+            log.warning("go2rtc sync skipped: GET /api/config -> %s", r.status_code)
+            return
+        try:
+            config = yaml.safe_load(r.text) or {}
+        except yaml.YAMLError as e:
+            log.warning("go2rtc sync skipped: cannot parse config: %s", e)
+            return
+        if not isinstance(config, dict):
+            log.warning("go2rtc sync skipped: config is not a mapping")
+            return
+
+        streams = config.get("streams") or {}
+        if not isinstance(streams, dict):
+            streams = {}
+        current_managed = {name: _normalize_src(src) for name, src in streams.items()
+                           if name.startswith("tuya_")}
+        if current_managed == desired:
+            return
+
+        new_streams = {name: src for name, src in streams.items() if not name.startswith("tuya_")}
+        new_streams.update(desired)
+        new_config = dict(config)
+        new_config["streams"] = new_streams
+
+        try:
+            r = await self._http.post("/api/config",
+                                       content=yaml.safe_dump(new_config, allow_unicode=True, sort_keys=False))
+        except httpx.HTTPError as e:
+            log.warning("go2rtc sync: cannot write config: %s", e)
+            return
+        if not (200 <= r.status_code < 300):
+            log.error("go2rtc sync: POST /api/config -> %s", r.status_code)
+            return
+
+        try:
+            r = await self._http.post("/api/restart")
+        except httpx.HTTPError as e:
+            log.warning("go2rtc sync: cannot restart: %s", e)
+            return
+        if not (200 <= r.status_code < 300):
+            log.warning("go2rtc sync: POST /api/restart -> %s", r.status_code)

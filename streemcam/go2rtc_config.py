@@ -6,6 +6,16 @@ import yaml
 
 from .config import Config, DahuaCamera, RtspCamera, XiaomiCamera
 
+COMPAT_SUFFIX = "~h264"
+
+
+def compat_name(cam_id: str) -> str:
+    return cam_id + COMPAT_SUFFIX
+
+
+def compat_src(cam_id: str) -> str:
+    return f"ffmpeg:{cam_id}#video=h264#width=1280#audio=aac"
+
 
 def stream_url(cam) -> str:
     match cam:
@@ -26,7 +36,10 @@ def stream_url(cam) -> str:
 
 def render(cfg: Config, existing: dict | None) -> dict:
     data = dict(existing or {})
-    data["streams"] = {cam.id: stream_url(cam) for cam in cfg.cameras}
+    streams = {cam.id: stream_url(cam) for cam in cfg.cameras}
+    for cam in cfg.cameras:
+        streams[compat_name(cam.id)] = compat_src(cam.id)
+    data["streams"] = streams
     data["api"] = {**(data.get("api") or {}), "listen": cfg.go2rtc_api_listen}
     data["webrtc"] = {**(data.get("webrtc") or {}), "listen": cfg.webrtc_listen}
     return data
