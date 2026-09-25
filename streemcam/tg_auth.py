@@ -23,7 +23,7 @@ def verify_init_data(init_data: str, bot_token: str, max_age: int = 3600,
     check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
     secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     expected = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(received, expected):
+    if not hmac.compare_digest(received.encode(), expected.encode()):
         raise TgAuthError("bad hash")
     try:
         auth_date = int(fields["auth_date"])

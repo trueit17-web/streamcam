@@ -37,3 +37,10 @@ def test_too_old():
 def test_malformed(bad):
     with pytest.raises(TgAuthError):
         verify_init_data(bad, TOKEN, now=1500)
+
+
+def test_non_ascii_hash_is_rejected_not_crash():
+    fields = dict(parse_qsl(make_init_data(TOKEN, user_id=42, auth_date=1000)))
+    fields["hash"] = "é" * 64
+    with pytest.raises(TgAuthError):
+        verify_init_data(urlencode(fields), TOKEN, now=1500)
