@@ -48,6 +48,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from streemcam.access import Access
+from streemcam.catalog import Catalog
 from streemcam.db import Store
 from streemcam.streams import StreamRegistry
 from streemcam.web.server import create_app
@@ -99,8 +100,9 @@ def make_web():
         registry = StreamRegistry(cfg.max_streams_per_user)
         access = Access(cfg, Store(":memory:"), registry)
         http = httpx.AsyncClient(base_url="http://go2rtc", transport=httpx.MockTransport(_go2rtc_http))
-        app = create_app(cfg, access, StubMonitor(), registry, http, upstream_connect=upstream_connect)
-        return SimpleNamespace(app=app, access=access, registry=registry)
+        catalog = Catalog(cfg)
+        app = create_app(cfg, catalog, access, StubMonitor(), registry, http, upstream_connect=upstream_connect)
+        return SimpleNamespace(app=app, access=access, registry=registry, catalog=catalog)
     return make
 
 

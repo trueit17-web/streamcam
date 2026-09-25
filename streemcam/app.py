@@ -6,6 +6,7 @@ import httpx
 import uvicorn
 
 from .access import Access
+from .catalog import Catalog
 from .config import Config
 from .db import Store
 from .monitor import CameraMonitor
@@ -30,8 +31,8 @@ async def supervise(name: str, factory: Callable[[], Awaitable[None]],
         delay = min(max(delay * 2, base_delay), max_delay)
 
 
-def alert_text(cfg: Config, cam_id: str, online: bool) -> str:
-    cam = cfg.camera(cam_id)
+def alert_text(catalog: Catalog, cfg: Config, cam_id: str, online: bool) -> str:
+    cam = catalog.get(cam_id)
     name = cam.name if cam else cam_id
     if online:
         return f"✅ Камера «{name}» снова онлайн."
@@ -56,6 +57,7 @@ def make_tg_bot(bot_token: str):
 
 async def run(cfg: Config) -> None:
     access = build_access(cfg)
+    catalog = Catalog(cfg)
     http = httpx.AsyncClient(base_url=cfg.go2rtc_url, timeout=20)
 
     tg_bot = None
@@ -65,10 +67,10 @@ async def run(cfg: Config) -> None:
     async def on_alert(cam_id: str, online: bool) -> None:
         if tg_bot is not None:
             from .tg.bot import notify_admins
-            await notify_admins(tg_bot, cfg, alert_text(cfg, cam_id, online))
+            await notify_admins(tg_bot, cfg, alert_text(catalog, cfg, cam_id, online))
 
-    monitor = CameraMonitor(cfg, http, on_alert)
-    app = create_app(cfg, access, monitor, access.registry, http)
+    monitor = CameraMonitor(cfg, catalog, http, on_alert)
+    app = create_app(cfg, catalog, access, monitor, access.registry, http)
     server = uvicorn.Server(uvicorn.Config(app, host=cfg.listen_host, port=cfg.listen_port,
                                            proxy_headers=True, forwarded_allow_ips="*"))
 
@@ -81,7 +83,7 @@ async def run(cfg: Config) -> None:
         log.info("telegram bot disabled (no token)")
     if cfg.discord.bot_token:
         from .dc.bot import run_discord
-        background.append(asyncio.create_task(supervise("discord", lambda: run_discord(cfg, access))))
+        background.append(asyncio.create_task(supervise("discord", lambda: run_discord(cfg, catalog, access))))
     else:
         log.info("discord bot disabled (no token)")
 

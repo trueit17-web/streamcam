@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from streemcam.catalog import Catalog
 from streemcam.monitor import CameraMonitor
 
 
@@ -32,7 +33,7 @@ def alerts():
 def make(cfg, up, alerts, clock):
     async def on_alert(cam_id, online):
         alerts.append((cam_id, online))
-    return CameraMonitor(cfg, client(up), on_alert, clock=clock)
+    return CameraMonitor(cfg, Catalog(cfg), client(up), on_alert, clock=clock)
 
 
 async def test_probe_all_sets_status_and_snapshot(cfg, alerts):
@@ -84,3 +85,12 @@ async def test_snapshot_kept_while_offline(cfg, alerts):
     up["yard"] = False
     await m.probe("yard")
     assert m.snapshot("yard") == b"JPEG-yard"
+
+
+async def test_probe_all_follows_catalog(cfg, alerts):
+    from streemcam.tuya.models import TuyaCamera
+    catalog = Catalog(cfg)
+    m = CameraMonitor(cfg, catalog, client({"tuya_bf1": True}), None, clock=Clock())
+    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    await m.probe_all()
+    assert m.snapshot("tuya_bf1") == b"JPEG-tuya_bf1"

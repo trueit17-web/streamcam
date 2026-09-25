@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from streemcam.access import Access
+from streemcam.catalog import Catalog
 from streemcam.db import Store
 from streemcam.dc.bot import DcHandlers, cams_links
 from streemcam.identity import Identity
@@ -18,7 +19,7 @@ def access(cfg):
 
 @pytest.fixture
 def h(cfg, access):
-    return DcHandlers(cfg, access)
+    return DcHandlers(cfg, Catalog(cfg), access)
 
 
 def make_inter(user_id):
@@ -33,7 +34,7 @@ def sent(inter):
 
 
 def test_cams_links(cfg, access):
-    links = cams_links(cfg, access, USER)
+    links = cams_links(cfg, Catalog(cfg), access, USER)
     assert [label for label, _ in links] == ["📹 Все камеры", "Двор", "Ворота", "Комната"]
     assert all(url.startswith("https://cams.example.com/?t=") for _, url in links)
     assert links[1][1].endswith("#cam=yard")
@@ -46,7 +47,7 @@ def test_cams_links_many_cameras(make_cfg):
     cams = [{"id": f"c{i}", "name": f"C{i}", "type": "rtsp", "url": "rtsp://x"} for i in range(25)]
     cfg = make_cfg(cameras=cams)
     access = Access(cfg, Store(":memory:"), StreamRegistry(4))
-    assert len(cams_links(cfg, access, USER)) == 1
+    assert len(cams_links(cfg, Catalog(cfg), access, USER)) == 1
 
 
 async def test_cams_allowed(h):

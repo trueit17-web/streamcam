@@ -25,9 +25,9 @@ def test_tg_session_and_cameras(web):
     assert body["player_mode"] == "mse"
     assert body["max_streams"] == 4
     assert body["cameras"] == [
-        {"id": "yard", "name": "Двор", "online": True},
-        {"id": "gate", "name": "Ворота", "online": False},
-        {"id": "room", "name": "Комната", "online": None},
+        {"id": "yard", "name": "Двор", "kind": "config", "online": True},
+        {"id": "gate", "name": "Ворота", "kind": "config", "online": False},
+        {"id": "room", "name": "Комната", "kind": "config", "online": None},
     ]
 
 
@@ -88,6 +88,16 @@ def test_snapshot(web):
     assert client.get("/api/snapshot/gate", headers=h).status_code == 404
     assert client.get("/api/snapshot/nope", headers=h).status_code == 404
     assert client.get("/api/snapshot/yard").status_code == 401
+
+
+def test_cameras_include_tuya(web):
+    from streemcam.tuya.models import TuyaCamera
+    web.catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    client = TestClient(web.app)
+    h = bearer(web.access.issue_session(USER))
+    cams = client.get("/api/cameras", headers=h).json()["cameras"]
+    assert cams[-1] == {"id": "tuya_bf1", "name": "Прихожая", "kind": "tuya", "online": None}
+    assert client.get("/api/snapshot/tuya_bf1", headers=h).status_code == 404  # снимка ещё нет
 
 
 def test_go2rtc_js_proxy_whitelist(web):

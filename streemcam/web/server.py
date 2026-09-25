@@ -14,6 +14,7 @@ from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import WebSocketException as UpstreamError
 
 from ..access import Access, AccessDenied
+from ..catalog import Catalog
 from ..config import Config
 from ..identity import Identity
 from ..streams import StreamLimitError, StreamRegistry
@@ -94,7 +95,7 @@ def _denied(ident: Identity) -> JSONResponse:
     return JSONResponse({"error": "not_allowed", "user_id": ident.user_id}, status_code=403)
 
 
-def create_app(cfg: Config, access: Access, monitor, registry: StreamRegistry,
+def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry: StreamRegistry,
                http: httpx.AsyncClient, upstream_connect=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     upstream_connect = upstream_connect or default_upstream(cfg.go2rtc_url)
@@ -138,13 +139,13 @@ def create_app(cfg: Config, access: Access, monitor, registry: StreamRegistry,
         return {
             "player_mode": cfg.player_mode,
             "max_streams": cfg.max_streams_per_user,
-            "cameras": [{"id": c.id, "name": c.name, "online": monitor.is_online(c.id)}
-                        for c in cfg.cameras],
+            "cameras": [{"id": c.id, "name": c.name, "kind": c.kind, "online": monitor.is_online(c.id)}
+                        for c in catalog.all()],
         }
 
     @app.get("/api/snapshot/{cam_id}")
     async def snapshot(cam_id: str, user: Identity = Depends(current_user)):
-        data = monitor.snapshot(cam_id) if cfg.camera(cam_id) else None
+        data = monitor.snapshot(cam_id) if catalog.get(cam_id) else None
         if data is None:
             raise HTTPException(404, "no snapshot")
         return Response(data, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
@@ -169,7 +170,7 @@ def create_app(cfg: Config, access: Access, monitor, registry: StreamRegistry,
         except AccessDenied:
             await ws.close(code=4403)
             return
-        if cfg.camera(src) is None:
+        if catalog.get(src) is None:
             await ws.close(code=4404)
             return
 

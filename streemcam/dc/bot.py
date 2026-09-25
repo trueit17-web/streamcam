@@ -5,6 +5,7 @@ from discord import app_commands
 
 from ..access import Access
 from ..admin import USAGE, format_users, parse_target
+from ..catalog import Catalog
 from ..config import Config
 from ..identity import Identity
 
@@ -13,13 +14,14 @@ log = logging.getLogger(__name__)
 MAX_CAMERA_BUTTONS = 24  # Discord: не больше 25 кнопок в сообщении, одна занята «Все камеры»
 
 
-def cams_links(cfg: Config, access: Access, ident: Identity) -> list[tuple[str, str]]:
+def cams_links(cfg: Config, catalog: Catalog, access: Access, ident: Identity) -> list[tuple[str, str]]:
     def link(fragment: str = "") -> str:
         return f"{cfg.public_url}/?t={access.issue_link_token(ident)}{fragment}"
 
+    cameras = catalog.all()
     links = [("📹 Все камеры", link())]
-    if len(cfg.cameras) <= MAX_CAMERA_BUTTONS:
-        links += [(cam.name, link(f"#cam={cam.id}")) for cam in cfg.cameras]
+    if len(cameras) <= MAX_CAMERA_BUTTONS:
+        links += [(cam.name, link(f"#cam={cam.id}")) for cam in cameras]
     return links
 
 
@@ -31,8 +33,9 @@ def build_view(links: list[tuple[str, str]]) -> discord.ui.View:
 
 
 class DcHandlers:
-    def __init__(self, cfg: Config, access: Access):
+    def __init__(self, cfg: Config, catalog: Catalog, access: Access):
         self.cfg = cfg
+        self.catalog = catalog
         self.access = access
 
     async def _reply(self, interaction: discord.Interaction, text: str, **kwargs) -> None:
@@ -43,7 +46,7 @@ class DcHandlers:
         if not self.access.is_allowed(ident):
             await self._reply(interaction, f"Нет доступа. Ваш ID: {ident.user_id} — передайте его администратору.")
             return
-        view = build_view(cams_links(self.cfg, self.access, ident))
+        view = build_view(cams_links(self.cfg, self.catalog, self.access, ident))
         await self._reply(
             interaction,
             f"Ссылки личные и одноразовые, действуют {self.cfg.token_ttl_minutes} мин.",
@@ -86,11 +89,11 @@ class DcHandlers:
 
 
 class DcBot(discord.Client):
-    def __init__(self, cfg: Config, access: Access):
+    def __init__(self, cfg: Config, catalog: Catalog, access: Access):
         super().__init__(intents=discord.Intents.default())
         self.cfg = cfg
         self.tree = app_commands.CommandTree(self)
-        h = DcHandlers(cfg, access)
+        h = DcHandlers(cfg, catalog, access)
 
         @self.tree.command(name="cams", description="Открыть камеры")
         async def cams(interaction: discord.Interaction) -> None:
@@ -120,7 +123,7 @@ class DcBot(discord.Client):
             await self.tree.sync()
 
 
-async def run_discord(cfg: Config, access: Access) -> None:
-    client = DcBot(cfg, access)
+async def run_discord(cfg: Config, catalog: Catalog, access: Access) -> None:
+    client = DcBot(cfg, catalog, access)
     async with client:
         await client.start(cfg.discord.bot_token)

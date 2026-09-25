@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from streemcam.app import alert_text, make_tg_bot, supervise
+from streemcam.catalog import Catalog
 
 
 def test_make_tg_bot_returns_none_for_invalid_token(caplog):
@@ -18,8 +19,9 @@ def test_make_tg_bot_returns_bot_for_valid_token():
 
 
 def test_alert_text(cfg):
-    assert alert_text(cfg, "yard", False) == "⚠️ Камера «Двор» офлайн больше 5 мин."
-    assert alert_text(cfg, "yard", True) == "✅ Камера «Двор» снова онлайн."
+    catalog = Catalog(cfg)
+    assert alert_text(catalog, cfg, "yard", False) == "⚠️ Камера «Двор» офлайн больше 5 мин."
+    assert alert_text(catalog, cfg, "yard", True) == "✅ Камера «Двор» снова онлайн."
 
 
 async def test_supervise_restarts_after_crash():

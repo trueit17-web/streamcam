@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from .catalog import Catalog
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -22,13 +23,17 @@ class _State:
 
 
 class CameraMonitor:
-    def __init__(self, cfg: Config, http: httpx.AsyncClient, on_alert: AlertFn | None = None,
-                 clock: Callable[[], float] = time.monotonic):
+    def __init__(self, cfg: Config, catalog: Catalog, http: httpx.AsyncClient,
+                 on_alert: AlertFn | None = None, clock: Callable[[], float] = time.monotonic):
         self.cfg = cfg
+        self.catalog = catalog
         self._http = http
         self._on_alert = on_alert
         self._clock = clock
-        self._state: dict[str, _State] = {cam.id: _State() for cam in cfg.cameras}
+        self._state: dict[str, _State] = {}
+
+    def _st(self, cam_id: str) -> _State:
+        return self._state.setdefault(cam_id, _State())
 
     def is_online(self, cam_id: str) -> bool | None:
         state = self._state.get(cam_id)
@@ -39,7 +44,7 @@ class CameraMonitor:
         return state.snapshot if state else None
 
     async def probe(self, cam_id: str) -> None:
-        state = self._state[cam_id]
+        state = self._st(cam_id)
         image = None
         try:
             r = await self._http.get("/api/frame.jpeg", params={"src": cam_id}, timeout=20)
@@ -68,7 +73,7 @@ class CameraMonitor:
             await self._alert(cam_id, False)
 
     async def probe_all(self) -> None:
-        await asyncio.gather(*(self.probe(cam.id) for cam in self.cfg.cameras))
+        await asyncio.gather(*(self.probe(cam.id) for cam in self.catalog.all()))
 
     async def run(self) -> None:
         while True:
