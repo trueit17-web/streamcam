@@ -66,7 +66,11 @@ async function refresh() {
     return false;
   }
   if (!r.ok) return true;
-  info = await r.json();
+  try {
+    info = await r.json();
+  } catch {
+    return true;
+  }
   return true;
 }
 
@@ -86,7 +90,8 @@ function renderList() {
   const list = $("#cams");
   list.replaceChildren(...info.cameras.map((cam) => {
     const li = document.createElement("li");
-    li.className = `cam ${cam.online === false ? "offline" : ""}`;
+    li.className = "cam";
+    if (cam.online === false) li.classList.add("offline");
     const img = document.createElement("img");
     img.alt = cam.name;
     img.src = snapshotUrl(cam.id);
@@ -148,15 +153,24 @@ $("#back").onclick = () => { history.replaceState(null, "", location.pathname); 
 $("#grid").onclick = () => openCameras(info.cameras.slice(0, info.max_streams));
 
 async function main() {
-  if (!(await login())) return;
-  if (!(await refresh())) return;
-  const wanted = new URLSearchParams(location.hash.slice(1)).get("cam");
-  const cam = info.cameras.find((c) => c.id === wanted);
-  cam ? openCameras([cam]) : renderList();
+  try {
+    if (!(await login())) return;
+    if (!(await refresh())) return;
+    const wanted = new URLSearchParams(location.hash.slice(1)).get("cam");
+    const cam = info.cameras.find((c) => c.id === wanted);
+    cam ? openCameras([cam]) : renderList();
+  } catch (e) {
+    showMessage("Не удалось загрузить камеры. Проверьте соединение и обновите страницу.");
+    return;
+  }
   setInterval(async () => {
     if (!token) return;
-    const ok = await refresh();
-    if (ok && !$("#cams").hidden) renderList();
+    try {
+      const ok = await refresh();
+      if (ok && !$("#cams").hidden) renderList();
+    } catch {
+      // Ignore network errors during periodic refresh
+    }
   }, 60000);
 }
 
