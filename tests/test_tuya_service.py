@@ -131,6 +131,29 @@ async def test_refresh_failures_alert_once(env):
     assert len(alerts) == 2
 
 
+async def test_refresh_failures_mark_cameras_offline(env):
+    make, client, alerts = env
+    svc, store, _, catalog = make()
+    store.save(CREDS)
+    svc.load()
+    await svc.refresh()
+    assert catalog.tuya()[0].online is True
+    client.fail = True
+    for _ in range(FAILURE_ALERT_AFTER):
+        await svc.refresh()
+    assert [c.online for c in catalog.tuya()] == [False]
+    assert [c.id for c in catalog.tuya()] == ["tuya_bf1"]
+
+
+async def test_account_uid(env):
+    make, _, _ = env
+    svc, store, _, _ = make()
+    assert svc.account_uid() is None
+    store.save(CREDS)
+    svc.load()
+    assert svc.account_uid() == "u1"
+
+
 async def test_logout(env):
     make, _, _ = env
     svc, store, sync, catalog = make()

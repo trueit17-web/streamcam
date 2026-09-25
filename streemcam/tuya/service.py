@@ -46,6 +46,12 @@ class TuyaService:
     def cameras(self) -> list[CameraInfo]:
         return self.catalog.tuya()
 
+    def account_uid(self) -> str | None:
+        creds = self._store.load()
+        if creds is None:
+            return None
+        return creds.token_info.get("uid")
+
     async def start_login(self, user_code: str) -> QrSession:
         if self._login is None:
             self._login = TuyaLogin()
@@ -86,8 +92,10 @@ class TuyaService:
         except TuyaError as e:
             self._failures += 1
             log.warning("tuya refresh failed (%d in a row): %s", self._failures, e)
-            if self._failures == FAILURE_ALERT_AFTER and self._on_alert is not None:
-                await self._on_alert(RELOGIN_TEXT)
+            if self._failures == FAILURE_ALERT_AFTER:
+                self.catalog.mark_tuya_offline()
+                if self._on_alert is not None:
+                    await self._on_alert(RELOGIN_TEXT)
             return False
         self._failures = 0
         self.catalog.set_tuya(cams)

@@ -49,3 +49,8 @@ class Catalog:
             infos.append(CameraInfo(tuya_cam_id(cam.device_id), cam.name, "tuya",
                                     device_id=cam.device_id, online=cam.online))
         self._tuya = sorted(infos, key=lambda c: c.name)
+
+    def mark_tuya_offline(self) -> None:
+        """Спека §5: при недоступности облака камеры остаются в списке, но помечаются офлайн."""
+        self._tuya = [CameraInfo(c.id, c.name, c.kind, device_id=c.device_id, online=False)
+                      for c in self._tuya]
