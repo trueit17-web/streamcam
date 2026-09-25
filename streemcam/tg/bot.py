@@ -134,13 +134,22 @@ class TgHandlers:
         except TuyaLoginError as e:
             await message.answer(f"Не удалось начать вход в Tuya: {e}")
             return
+        except Exception as e:
+            log.warning("tuya start_login failed: %s", e)
+            await message.answer(f"Не удалось начать вход в Tuya: {e}")
+            return
         await message.answer_photo(BufferedInputFile(qr_png(session.qr_payload), "tuya-login.png"),
                                    caption=TUYA_QR_CAPTION)
         if not await self.tuya.wait_login(session):
-            await message.answer("Вход не подтвёрждён (истекло время или начата новая попытка). "
+            await message.answer("Вход не подтверждён (истекло время или начата новая попытка). "
                                  "Повторите /tuya_login <код пользователя>.")
             return
-        await message.answer("✅ Вход в Tuya выполнен.\n" + format_tuya_cameras(self.tuya.cameras()))
+        cams = self.tuya.cameras()
+        if not cams:
+            await message.answer("✅ Вход в Tuya выполнен, но список камер пока не получен — "
+                                 "проверьте /tuya_status через минуту.")
+            return
+        await message.answer("✅ Вход в Tuya выполнен.\n" + format_tuya_cameras(cams))
 
     async def tuya_status(self, message: Message) -> None:
         if not await self._require_tuya_admin(message):
@@ -148,7 +157,12 @@ class TgHandlers:
         if not self.tuya.logged_in:
             await message.answer("Вход в Tuya не выполнен. " + TUYA_USAGE)
             return
-        await message.answer("Вход в Tuya выполнен.\n" + format_tuya_cameras(self.tuya.cameras()))
+        lines = ["Вход в Tuya выполнен."]
+        uid = self.tuya.account_uid()
+        if uid:
+            lines.append(f"Аккаунт: {uid}")
+        lines.append(format_tuya_cameras(self.tuya.cameras()))
+        await message.answer("\n".join(lines))
 
     async def tuya_logout(self, message: Message) -> None:
         if not await self._require_tuya_admin(message):

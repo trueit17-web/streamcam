@@ -16,15 +16,20 @@ CAMS = [CameraInfo("tuya_bf1", "Прихожая", "tuya", "bf1", True),
 
 
 class FakeTuya:
-    def __init__(self, ok=True, start_error=None):
+    def __init__(self, ok=True, start_error=None, start_exception=None, empty_cameras=False, uid=None):
         self.ok = ok
         self.start_error = start_error
+        self.start_exception = start_exception
+        self.empty_cameras = empty_cameras
+        self.uid = uid
         self.logged_in = False
         self.logged_out = False
 
     async def start_login(self, code):
         if self.start_error:
             raise TuyaLoginError(self.start_error)
+        if self.start_exception:
+            raise self.start_exception
         return QrSession(code, "QR1")
 
     async def wait_login(self, session):
@@ -32,7 +37,12 @@ class FakeTuya:
         return self.ok
 
     def cameras(self):
-        return CAMS if self.logged_in else []
+        if not self.logged_in:
+            return []
+        return [] if self.empty_cameras else CAMS
+
+    def account_uid(self):
+        return self.uid
 
     async def logout(self):
         self.logged_out = True
@@ -84,6 +94,7 @@ async def test_login_timeout(cfg, access):
     msg = make_msg()
     await handlers(cfg, access, FakeTuya(ok=False)).tuya_login(msg, cmd("UC1"))
     assert "/tuya_login" in texts(msg)[-1]
+    assert "подтверждён" in texts(msg)[-1]
 
 
 async def test_login_start_error(cfg, access):
@@ -91,6 +102,22 @@ async def test_login_start_error(cfg, access):
     await handlers(cfg, access, FakeTuya(start_error="user code invalid")).tuya_login(msg, cmd("BAD"))
     assert "user code invalid" in texts(msg)[-1]
     msg.answer_photo.assert_not_called()
+
+
+async def test_login_start_unexpected_exception(cfg, access):
+    msg = make_msg()
+    tuya = FakeTuya(start_exception=RuntimeError("network unreachable"))
+    await handlers(cfg, access, tuya).tuya_login(msg, cmd("UC1"))
+    assert "Не удалось начать вход в Tuya" in texts(msg)[-1]
+    assert "network unreachable" in texts(msg)[-1]
+    msg.answer_photo.assert_not_called()
+
+
+async def test_login_success_but_no_cameras_yet(cfg, access):
+    msg = make_msg()
+    tuya = FakeTuya(empty_cameras=True)
+    await handlers(cfg, access, tuya).tuya_login(msg, cmd("UC1"))
+    assert "/tuya_status" in texts(msg)[-1]
 
 
 async def test_login_requires_code(cfg, access):
@@ -113,7 +140,7 @@ async def test_tuya_disabled(cfg, access):
 
 
 async def test_status_and_logout(cfg, access):
-    tuya = FakeTuya()
+    tuya = FakeTuya(uid="u1")
     h = handlers(cfg, access, tuya)
     msg = make_msg()
     await h.tuya_status(msg)
@@ -121,5 +148,6 @@ async def test_status_and_logout(cfg, access):
     tuya.logged_in = True
     await h.tuya_status(msg)
     assert "Прихожая" in texts(msg)[-1]
+    assert "Аккаунт: u1" in texts(msg)[-1]
     await h.tuya_logout(msg)
     assert tuya.logged_out and "Выход" in texts(msg)[-1]
