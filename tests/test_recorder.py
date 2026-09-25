@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from streemcam.catalog import Catalog
+from streemcam.go2rtc_config import TUYA_AUDIO_FILTER
 from streemcam.recording.recorder import Recorder, RecTarget, backoff, ffmpeg_args, targets
 from streemcam.tuya.models import TuyaCamera
 
@@ -91,16 +92,27 @@ def test_ffmpeg_args(tmp_path):
                  "-map 0:v:0", "-map 0:a:0?"]:
         assert part in joined
     assert args[-1] == str(tmp_path / "room" / "%Y-%m-%d" / "%H-%M-%S.mp4")
+    assert "-af" not in args
+
+
+def test_ffmpeg_args_with_audio_filter(tmp_path):
+    args = ffmpeg_args("rtsp://go2rtc:8554/tuya_bf1", tmp_path / "tuya_bf1", audio_filter=TUYA_AUDIO_FILTER)
+    assert args[args.index("-af") + 1] == TUYA_AUDIO_FILTER
+    assert args[args.index("-af") + 2] == "-c:a"
 
 
 def test_targets(rcfg):
     catalog = Catalog(rcfg)
     catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
     ts = {t.cam_id: t for t in targets(rcfg, catalog)}
-    assert ts["yard"] == RecTarget("yard", "Двор", "rtsp://go2rtc:8554/yard")
+    assert ts["yard"] == RecTarget("yard", "Двор", "rtsp://go2rtc:8554/yard", None)
+    assert ts["yard"].audio_filter is None
     assert ts["gate"].input_url == "rtsp://go2rtc:8554/gate~rec"
+    assert ts["gate"].audio_filter is None
     assert ts["room"].input_url == "rtsp://go2rtc:8554/room~rec"
+    assert ts["room"].audio_filter is None
     assert ts["tuya_bf1"].input_url == "rtsp://go2rtc:8554/tuya_bf1"
+    assert ts["tuya_bf1"].audio_filter == TUYA_AUDIO_FILTER
 
 
 def test_targets_skips_offline_tuya_cameras(rcfg):

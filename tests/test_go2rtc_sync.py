@@ -2,7 +2,15 @@ import httpx
 import yaml
 
 from streemcam.catalog import Catalog
-from streemcam.go2rtc_config import COMPAT_SUFFIX, compat_name, compat_src
+from streemcam.go2rtc_config import (
+    COMPAT_SUFFIX,
+    LIVE_SUFFIX,
+    TUYA_AUDIO_FILTER,
+    compat_name,
+    compat_src,
+    tuya_compat_src,
+    tuya_live_src,
+)
 from streemcam.go2rtc_sync import Go2rtcSync, desired_streams, tuya_src
 from streemcam.tuya.models import TuyaCamera
 
@@ -12,9 +20,14 @@ URL = "http://streemcam:8081"
 
 def test_helpers():
     assert COMPAT_SUFFIX == "~h264"
+    assert LIVE_SUFFIX == "~live"
     assert compat_name("room") == "room~h264"
     assert compat_src("room") == "ffmpeg:room#video=h264#width=1280#audio=aac"
     assert tuya_src(URL, "bf1", KEY) == f"echo:curl -fsS {URL}/tuya/bf1?key={KEY}"
+    assert tuya_live_src("tuya_bf1") == f"ffmpeg:tuya_bf1#video=copy#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+    assert tuya_compat_src("tuya_bf1") == (
+        f"ffmpeg:tuya_bf1#video=h264#width=1280#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+    )
 
 
 def test_desired_streams(cfg):
@@ -22,9 +35,10 @@ def test_desired_streams(cfg):
     catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
     d = desired_streams(catalog, URL, KEY)
     assert d["tuya_bf1"] == tuya_src(URL, "bf1", KEY)
-    assert d["tuya_bf1~h264"] == compat_src("tuya_bf1")
+    assert d["tuya_bf1~live"] == tuya_live_src("tuya_bf1")
+    assert d["tuya_bf1~h264"] == tuya_compat_src("tuya_bf1")
     assert "yard" not in d and "yard~h264" not in d  # потоки из конфига рендерит go2rtc-config
-    assert len(d) == 2
+    assert len(d) == 3
 
 
 def test_desired_streams_without_key_skips_tuya(cfg):
@@ -61,7 +75,8 @@ async def test_no_change_skips_writes(cfg):
         "streams": {
             "xiaomi_cam": "xiaomi://...",
             "tuya_bf1": tuya_src(URL, "bf1", KEY),
-            "tuya_bf1~h264": compat_src("tuya_bf1"),
+            "tuya_bf1~live": tuya_live_src("tuya_bf1"),
+            "tuya_bf1~h264": tuya_compat_src("tuya_bf1"),
         },
     }
     calls, http = recorder(yaml.safe_dump(config))
@@ -75,7 +90,8 @@ async def test_no_change_normalises_single_element_list(cfg):
     config = {
         "streams": {
             "tuya_bf1": [tuya_src(URL, "bf1", KEY)],
-            "tuya_bf1~h264": [compat_src("tuya_bf1")],
+            "tuya_bf1~live": [tuya_live_src("tuya_bf1")],
+            "tuya_bf1~h264": [tuya_compat_src("tuya_bf1")],
         },
     }
     calls, http = recorder(yaml.safe_dump(config))
@@ -98,7 +114,8 @@ async def test_new_tuya_camera_writes_config_and_restarts(cfg):
     assert posted["xiaomi"] == {"1234567": "secret-token"}
     assert posted["streams"]["manual"] == "rtsp://x"
     assert posted["streams"]["tuya_bf1"] == tuya_src(URL, "bf1", KEY)
-    assert posted["streams"]["tuya_bf1~h264"] == compat_src("tuya_bf1")
+    assert posted["streams"]["tuya_bf1~live"] == tuya_live_src("tuya_bf1")
+    assert posted["streams"]["tuya_bf1~h264"] == tuya_compat_src("tuya_bf1")
 
 
 async def test_removed_tuya_camera_writes_config_and_restarts(cfg):
@@ -107,7 +124,8 @@ async def test_removed_tuya_camera_writes_config_and_restarts(cfg):
         "streams": {
             "manual": "rtsp://x",
             "tuya_bf1": tuya_src(URL, "bf1", KEY),
-            "tuya_bf1~h264": compat_src("tuya_bf1"),
+            "tuya_bf1~live": tuya_live_src("tuya_bf1"),
+            "tuya_bf1~h264": tuya_compat_src("tuya_bf1"),
         },
     }
     calls, http = recorder(yaml.safe_dump(config))
@@ -116,6 +134,7 @@ async def test_removed_tuya_camera_writes_config_and_restarts(cfg):
     assert kinds == ["GET", "POST /api/config", "POST /api/restart"]
     posted = yaml.safe_load(calls[1][1])
     assert "tuya_bf1" not in posted["streams"]
+    assert "tuya_bf1~live" not in posted["streams"]
     assert "tuya_bf1~h264" not in posted["streams"]
     assert posted["streams"]["manual"] == "rtsp://x"
 

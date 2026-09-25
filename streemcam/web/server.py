@@ -17,6 +17,7 @@ from websockets.exceptions import WebSocketException as UpstreamError
 from ..access import Access, AccessDenied
 from ..catalog import Catalog
 from ..config import Config
+from ..go2rtc_config import LIVE_SUFFIX
 from ..go2rtc_sync import compat_name
 from ..identity import Identity
 from ..recording.archive import Archive
@@ -232,10 +233,16 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
         except AccessDenied:
             await ws.close(code=4403)
             return
-        if catalog.get(src) is None:
+        cam = catalog.get(src)
+        if cam is None:
             await ws.close(code=4404)
             return
-        upstream_name = compat_name(src) if compat else src
+        if compat:
+            upstream_name = compat_name(src)
+        elif cam.kind == "tuya":
+            upstream_name = src + LIVE_SUFFIX
+        else:
+            upstream_name = src
         if compat and not transcodes.try_acquire():
             await ws.close(code=4430)
             return

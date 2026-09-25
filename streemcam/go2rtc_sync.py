@@ -5,11 +5,11 @@ import httpx
 import yaml
 
 from .catalog import Catalog
-from .go2rtc_config import COMPAT_SUFFIX, compat_name, compat_src
+from .go2rtc_config import COMPAT_SUFFIX, LIVE_SUFFIX, compat_name, compat_src, tuya_compat_src, tuya_live_src
 
 log = logging.getLogger(__name__)
 
-__all__ = ["COMPAT_SUFFIX", "compat_name", "compat_src", "tuya_src", "desired_streams", "Go2rtcSync"]
+__all__ = ["COMPAT_SUFFIX", "LIVE_SUFFIX", "compat_name", "compat_src", "tuya_src", "desired_streams", "Go2rtcSync"]
 
 
 def tuya_src(internal_url: str, device_id: str, key: str) -> str:
@@ -26,7 +26,8 @@ def desired_streams(catalog: Catalog, internal_url: str, key: str | None) -> dic
             continue
         name = cam.id
         streams[name] = tuya_src(internal_url, cam.device_id, key)
-        streams[compat_name(name)] = compat_src(name)
+        streams[name + LIVE_SUFFIX] = tuya_live_src(name)
+        streams[compat_name(name)] = tuya_compat_src(name)
     return streams
 
 

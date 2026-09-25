@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from streemcam.identity import Identity
+from streemcam.tuya.models import TuyaCamera
 
 USER = Identity("tg", 42)
 
@@ -182,6 +183,42 @@ def test_compat_uses_h264_stream(make_web, cfg):
             assert ws.receive_text() == "echo:x"
             _close_and_wait_released(client, web, ws)
     assert connected == ["yard~h264"]
+
+
+def test_tuya_uses_live_stream(make_web, cfg):
+    connected = []
+    web = make_web(cfg, upstream_connect=recording_connect(connected))
+    web.catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    with TestClient(web.app) as client:
+        with client.websocket_connect(ws_url(web, src="tuya_bf1")) as ws:
+            ws.send_text("x")
+            assert ws.receive_text() == "echo:x"
+            _close_and_wait_released(client, web, ws)
+    assert connected == ["tuya_bf1~live"]
+
+
+def test_tuya_compat_uses_h264_stream(make_web, cfg):
+    connected = []
+    web = make_web(cfg, upstream_connect=recording_connect(connected))
+    web.catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    with TestClient(web.app) as client:
+        with client.websocket_connect(ws_url(web, src="tuya_bf1") + "&compat=1") as ws:
+            ws.send_text("x")
+            assert ws.receive_text() == "echo:x"
+            _close_and_wait_released(client, web, ws)
+    assert connected == ["tuya_bf1~h264"]
+
+
+def test_config_camera_uses_plain_stream_not_live(make_web, cfg):
+    connected = []
+    web = make_web(cfg, upstream_connect=recording_connect(connected))
+    web.catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    with TestClient(web.app) as client:
+        with client.websocket_connect(ws_url(web, src="yard")) as ws:
+            ws.send_text("x")
+            assert ws.receive_text() == "echo:x"
+            _close_and_wait_released(client, web, ws)
+    assert connected == ["yard"]
 
 
 def test_transcode_limit(make_web, make_cfg):

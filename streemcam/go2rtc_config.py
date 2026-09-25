@@ -9,6 +9,8 @@ from .config import Config, DahuaCamera, RtspCamera, XiaomiCamera
 
 COMPAT_SUFFIX = "~h264"
 REC_SUFFIX = "~rec"
+LIVE_SUFFIX = "~live"
+TUYA_AUDIO_FILTER = "highpass=f=120,lowpass=f=3400,aresample=48000"
 
 
 def compat_name(cam_id: str) -> str:
@@ -17,6 +19,14 @@ def compat_name(cam_id: str) -> str:
 
 def compat_src(cam_id: str) -> str:
     return f"ffmpeg:{cam_id}#video=h264#width=1280#audio=aac"
+
+
+def tuya_live_src(cam_id: str) -> str:
+    return f"ffmpeg:{cam_id}#video=copy#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+
+
+def tuya_compat_src(cam_id: str) -> str:
+    return f"ffmpeg:{cam_id}#video=h264#width=1280#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
 
 
 def rec_stream_name(cfg: Config, cam: CameraInfo) -> str | None:

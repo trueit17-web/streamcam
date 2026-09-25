@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..catalog import Catalog
 from ..config import Config
-from ..go2rtc_config import rec_stream_name
+from ..go2rtc_config import TUYA_AUDIO_FILTER, rec_stream_name
 from .schedule import is_recording_time, local_now
 
 log = logging.getLogger(__name__)
@@ -25,18 +25,24 @@ def backoff(failures: int) -> float:
     return float(min(60, 5 * 2 ** (failures - 1)))
 
 
-def ffmpeg_args(input_url: str, out_dir: Path, ffmpeg: str = "ffmpeg") -> list[str]:
-    return [
+def ffmpeg_args(input_url: str, out_dir: Path, ffmpeg: str = "ffmpeg",
+                 audio_filter: str | None = None) -> list[str]:
+    args = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",  # без -nostdin: stdin нужен для мягкой остановки "q"
         "-rtsp_transport", "tcp", "-timeout", "10000000", "-i", input_url,
         "-map", "0:v:0", "-map", "0:a:0?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-g", "50",
+    ]
+    if audio_filter:
+        args += ["-af", audio_filter]
+    args += [
         "-c:a", "aac", "-b:a", "64k",
         "-f", "segment", "-segment_time", "3600", "-segment_atclocktime", "1",
         "-reset_timestamps", "1", "-strftime", "1", "-segment_format", "mp4",
         "-segment_format_options", "movflags=+frag_keyframe+empty_moov+default_base_moof",
         str(out_dir / "%Y-%m-%d" / "%H-%M-%S.mp4"),
     ]
+    return args
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,7 @@ class RecTarget:
     cam_id: str
     name: str
     input_url: str
+    audio_filter: str | None = None
 
 
 def targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
@@ -53,7 +60,8 @@ def targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
             continue
         stream = rec_stream_name(cfg, cam)
         if stream is not None:
-            result.append(RecTarget(cam.id, cam.name, f"{cfg.recording.rtsp_url}/{stream}"))
+            audio_filter = TUYA_AUDIO_FILTER if cam.kind == "tuya" else None
+            result.append(RecTarget(cam.id, cam.name, f"{cfg.recording.rtsp_url}/{stream}", audio_filter))
     return result
 
 
@@ -144,7 +152,8 @@ class Recorder:
         local = local_now(wall, self.cfg.recording)
         (out_dir / local.strftime("%Y-%m-%d")).mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "TZ": self.cfg.recording.timezone}
-        st.proc = await self._spawn(*ffmpeg_args(st.target.input_url, out_dir, self._ffmpeg),
+        st.proc = await self._spawn(*ffmpeg_args(st.target.input_url, out_dir, self._ffmpeg,
+                                                  st.target.audio_filter),
                                     stdin=asyncio.subprocess.PIPE,
                                     stdout=asyncio.subprocess.DEVNULL, env=env)
         st.started_at = mono
