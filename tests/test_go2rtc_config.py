@@ -1,0 +1,52 @@
+import yaml
+
+from streemcam.go2rtc_config import render, stream_url, write_go2rtc_config
+
+
+def test_stream_urls(cfg):
+    assert stream_url(cfg.camera("yard")) == "rtsp://10.0.0.5:554/stream1"
+    assert stream_url(cfg.camera("gate")) == (
+        "rtsp://admin:p%40ss%3Aw%2Frd@10.0.0.6:554/cam/realmonitor?channel=1&subtype=1"
+    )
+    assert stream_url(cfg.camera("room")) == (
+        "xiaomi://1234567:de@10.0.0.7?did=987654&model=chuangmi.camera.v2"
+    )
+
+
+def test_xiaomi_subtype(make_cfg, base_data):
+    cams = base_data["cameras"]
+    cams[2]["subtype"] = 1
+    assert stream_url(make_cfg(cameras=cams).camera("room")).endswith("&subtype=1")
+
+
+def test_render_sets_streams_and_listen(cfg):
+    data = render(cfg, None)
+    assert set(data["streams"]) == {"yard", "gate", "room"}
+    assert data["api"]["listen"] == "127.0.0.1:1984"
+    assert data["webrtc"]["listen"] == ":8555"
+
+
+def test_render_preserves_foreign_keys(cfg):
+    existing = {
+        "xiaomi": {"1234567": "secret-token"},
+        "streams": {"old": "rtsp://x"},
+        "api": {"username": "u"},
+    }
+    data = render(cfg, existing)
+    assert data["xiaomi"] == {"1234567": "secret-token"}
+    assert "old" not in data["streams"]
+    assert data["api"] == {"username": "u", "listen": "127.0.0.1:1984"}
+    assert existing["streams"] == {"old": "rtsp://x"}  # вход не мутируется
+
+
+def test_write_keeps_xiaomi_tokens_between_runs(tmp_path, cfg):
+    path = tmp_path / "go2rtc" / "go2rtc.yaml"
+    write_go2rtc_config(path, cfg)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["xiaomi"] = {"1234567": "tok"}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    write_go2rtc_config(path, cfg)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert data["xiaomi"] == {"1234567": "tok"}
+    assert data["streams"]["yard"] == "rtsp://10.0.0.5:554/stream1"
