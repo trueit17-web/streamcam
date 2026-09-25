@@ -30,3 +30,9 @@ main { padding: 0 16px 16px; }
 .player:fullscreen .bar { position: absolute; bottom: 0; left: 0; right: 0; opacity: .8; }
 #compat-wrap { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
 #compat-hint { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+#archive .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+#archive .chips button { background: var(--card); color: var(--fg); }
+#archive .chips button.active { background: var(--accent); color: var(--accent-fg); }
+#archive-player video { width: 100%; max-height: 70vh; background: #000; border-radius: 12px; }
+#archive-download, .button { display: inline-block; margin-top: 8px; background: var(--accent); color: var(--accent-fg); border-radius: 8px; padding: 6px 12px; text-decoration: none; }
+#archive-empty { color: var(--muted); }

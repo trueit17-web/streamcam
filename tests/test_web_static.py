@@ -18,3 +18,10 @@ def test_compat_toggle_present(web):
     assert 'id="compat"' in client.get("/").text
     js = client.get("/static/app.js").text
     assert "compat=1" in js and "sc_compat" in js
+
+
+def test_archive_ui_present(web):
+    client = TestClient(web.app)
+    assert 'id="mode-archive"' in client.get("/").text
+    js = client.get("/static/app.js").text
+    assert "/api/archive/" in js and "download=1" in js

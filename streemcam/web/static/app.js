@@ -30,6 +30,7 @@ function stopPlayers() {
 
 function showMessage(text) {
   stopPlayers();
+  hideArchive();
   $("#message").textContent = text;
   $("#message").hidden = false;
   $("#cams").hidden = true;
@@ -37,6 +38,7 @@ function showMessage(text) {
   $("#viewer").replaceChildren();
   $("#back").hidden = true;
   $("#grid").hidden = true;
+  $("#mode-archive").hidden = true;
 }
 
 async function api(path, options = {}) {
@@ -120,7 +122,7 @@ function renderList() {
     caption.querySelector("b").textContent = cam.name;
     caption.querySelector(".status").textContent = statusText(cam.online);
     li.append(img, caption);
-    li.onclick = () => openCameras([cam]);
+    li.onclick = () => (archiveMode ? openArchive(cam) : openCameras([cam]));
     return li;
   }));
   $("#message").hidden = true;
@@ -130,6 +132,8 @@ function renderList() {
   $("#back").hidden = true;
   $("#grid").hidden = info.cameras.length < 2;
   $("#title").textContent = "Камеры";
+  $("#mode-archive").hidden = !info.recording;
+  if (archiveMode) $("#grid").hidden = true;
 }
 
 function player(cam) {
@@ -170,7 +174,7 @@ function openCameras(cams) {
   if (cams.length === 1) history.replaceState(null, "", `#cam=${cams[0].id}`);
 }
 
-$("#back").onclick = () => { stopPlayers(); history.replaceState(null, "", location.pathname); renderList(); };
+$("#back").onclick = () => { hideArchive(); stopPlayers(); history.replaceState(null, "", location.pathname); renderList(); };
 $("#grid").onclick = () => openCameras(info.cameras.slice(0, info.max_streams));
 function applyCompatUi() {
   $("#compat").checked = compat;
@@ -205,5 +209,80 @@ async function main() {
     }
   }, 60000);
 }
+
+let archiveMode = false;
+let archiveCam = null;
+
+function archiveUrl(path) {
+  return `/api/archive/${path}`;
+}
+
+function fileUrl(cam, day, name, download) {
+  const q = `s=${encodeURIComponent(token)}${download ? "&download=1" : ""}`;
+  return archiveUrl(`${encodeURIComponent(cam)}/${day}/${name}.mp4?${q}`);
+}
+
+function hideArchive() {
+  const video = $("#archive-video");
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  $("#archive").hidden = true;
+}
+
+function setArchiveMode(on) {
+  archiveMode = on;
+  $("#mode-archive").textContent = on ? "Живое" : "Архив";
+  hideArchive();
+  renderList();
+  $("#title").textContent = on ? "Архив" : "Камеры";
+}
+
+function chip(text, onClick, active) {
+  const b = document.createElement("button");
+  b.textContent = text;
+  if (active) b.classList.add("active");
+  b.onclick = onClick;
+  return b;
+}
+
+async function openArchive(cam) {
+  stopPlayers();
+  archiveCam = cam;
+  $("#cams").hidden = true;
+  $("#grid").hidden = true;
+  $("#back").hidden = false;
+  $("#title").textContent = `Архив: ${cam.name}`;
+  $("#archive").hidden = false;
+  $("#archive-player").hidden = true;
+  $("#archive-hours").replaceChildren();
+  const r = await api(archiveUrl(`${encodeURIComponent(cam.id)}/days`));
+  const days = r.ok ? (await r.json()).days : [];
+  $("#archive-empty").hidden = days.length > 0;
+  $("#archive-empty").textContent = "Записей пока нет.";
+  $("#archive-days").replaceChildren(...days.map((d) => chip(d, () => openDay(cam, d))));
+  if (days.length) openDay(cam, days[0]);
+}
+
+async function openDay(cam, day) {
+  for (const b of $("#archive-days").children) b.classList.toggle("active", b.textContent === day);
+  const r = await api(archiveUrl(`${encodeURIComponent(cam.id)}/${day}`));
+  const hours = r.ok ? (await r.json()).hours : [];
+  $("#archive-hours").replaceChildren(...hours.map((h) => {
+    const label = `${h.name.slice(0, 2)}:${h.name.slice(3, 5)}${h.recording ? " •" : ""} · ${(h.size / 1e6).toFixed(0)} МБ`;
+    return chip(label, (ev) => playHour(cam, day, h, ev.currentTarget));
+  }));
+}
+
+function playHour(cam, day, h, button) {
+  for (const b of $("#archive-hours").children) b.classList.toggle("active", b === button);
+  const video = $("#archive-video");
+  video.src = fileUrl(cam.id, day, h.name, false);
+  video.play().catch(() => {});
+  $("#archive-download").href = fileUrl(cam.id, day, h.name, true);
+  $("#archive-player").hidden = false;
+}
+
+$("#mode-archive").onclick = () => setArchiveMode(!archiveMode);
 
 main();

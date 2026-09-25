@@ -11,6 +11,7 @@
   <header>
     <button id="back" hidden>← Назад</button>
     <h1 id="title">Камеры</h1>
+    <button id="mode-archive" hidden>Архив</button>
     <label id="compat-wrap" title="Перекодировать видео в H.264 на сервере — для устройств без поддержки H.265">
       <input type="checkbox" id="compat"> Совместимый режим
     </label>
@@ -21,6 +22,15 @@
     <p id="message" hidden></p>
     <ul id="cams" hidden></ul>
     <section id="viewer" hidden></section>
+    <section id="archive" hidden>
+      <div id="archive-days" class="chips"></div>
+      <div id="archive-hours" class="chips"></div>
+      <div id="archive-player" hidden>
+        <video id="archive-video" controls playsinline preload="metadata"></video>
+        <a id="archive-download" class="button" download>Скачать</a>
+      </div>
+      <p id="archive-empty" hidden></p>
+    </section>
   </main>
   <script type="module" src="/static/app.js"></script>
 </body>
