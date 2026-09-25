@@ -64,6 +64,9 @@ class TuyaService:
                 log.warning("tuya login poll failed: %s", e)
                 creds = None
             if creds is not None:
+                # Re-check that this session is still current after poll returns (TOCTOU fix)
+                if self._current_session is not session:
+                    return False  # новая попытка началась, проигнорируем старый результат
                 self._store.save(creds)
                 self._client = self._client_factory(creds, self._store)
                 self._current_session = None

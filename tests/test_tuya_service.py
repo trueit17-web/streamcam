@@ -140,3 +140,43 @@ async def test_logout(env):
     await svc.logout()
     assert not svc.logged_in and store.load() is None
     assert catalog.tuya() == [] and sync.count == 2
+
+
+async def test_login_race_stale_poll_ignored(env):
+    """TOCTOU race: poll for stale session should not commit credentials."""
+    make, _, _ = env
+    svc, store, _, _ = make()
+
+    # Custom login that simulates concurrent start_login during poll
+    class RaceLogin:
+        def __init__(self, svc):
+            self.svc = svc
+            self.started = []
+
+        def start(self, user_code):
+            self.started.append(user_code)
+            return QrSession(user_code, f"QR-{len(self.started)}")
+
+        def poll(self, session):
+            # Simulate concurrent start_login while we're polling
+            if session.qr_payload == "tuyaSmart--qrLogin?token=QR-1":
+                # Start a new login attempt (sets _current_session to QR-2)
+                self.svc._current_session = QrSession("UC1", "QR-2")
+                # Return credentials for the old session
+                return CREDS
+            return None
+
+    race_login = RaceLogin(svc)
+    svc._login = race_login
+
+    # Start first login (QR-1)
+    first = await svc.start_login("UC1")
+    assert first.qr_payload == "tuyaSmart--qrLogin?token=QR-1"
+
+    # Wait for login; poll will trigger concurrent start_login and return CREDS
+    result = await svc.wait_login(first, timeout=1.0, interval=0)
+
+    # Stale poll result should be ignored
+    assert result is False
+    assert store.load() is None  # Credentials not saved
+    assert svc.logged_in is False  # Client not created
