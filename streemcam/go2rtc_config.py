@@ -4,9 +4,11 @@ from urllib.parse import quote, urlencode
 
 import yaml
 
+from .catalog import CameraInfo
 from .config import Config, DahuaCamera, RtspCamera, XiaomiCamera
 
 COMPAT_SUFFIX = "~h264"
+REC_SUFFIX = "~rec"
 
 
 def compat_name(cam_id: str) -> str:
@@ -17,19 +19,32 @@ def compat_src(cam_id: str) -> str:
     return f"ffmpeg:{cam_id}#video=h264#width=1280#audio=aac"
 
 
-def stream_url(cam) -> str:
+def rec_stream_name(cfg: Config, cam: CameraInfo) -> str | None:
+    if cam.kind == "tuya":
+        return cam.id if cfg.recording.tuya else None
+    src = cfg.camera(cam.id)
+    if src is None or not src.record:
+        return None
+    if isinstance(src, (XiaomiCamera, DahuaCamera)):
+        return cam.id + REC_SUFFIX
+    return cam.id
+
+
+def stream_url(cam, subtype: int | None = None) -> str:
     match cam:
         case RtspCamera():
             return cam.url
         case DahuaCamera():
             user = quote(cam.user, safe="")
             password = quote(cam.password, safe="")
+            sub = subtype if subtype is not None else cam.subtype
             return (f"rtsp://{user}:{password}@{cam.host}:{cam.port}"
-                    f"/cam/realmonitor?channel={cam.channel}&subtype={cam.subtype}")
+                    f"/cam/realmonitor?channel={cam.channel}&subtype={sub}")
         case XiaomiCamera():
             query = {"did": cam.did, "model": cam.model}
-            if cam.subtype is not None:
-                query["subtype"] = cam.subtype
+            sub = subtype if subtype is not None else cam.subtype
+            if sub is not None:
+                query["subtype"] = sub
             return f"xiaomi://{quote(cam.account, safe='')}:{cam.region}@{cam.host}?{urlencode(query)}"
     raise TypeError(f"unknown camera type: {cam!r}")
 
@@ -39,9 +54,17 @@ def render(cfg: Config, existing: dict | None) -> dict:
     streams = {cam.id: stream_url(cam) for cam in cfg.cameras}
     for cam in cfg.cameras:
         streams[compat_name(cam.id)] = compat_src(cam.id)
+    for cam in cfg.cameras:
+        if not cam.record:
+            continue
+        if isinstance(cam, XiaomiCamera):
+            streams[cam.id + REC_SUFFIX] = stream_url(cam, subtype=cam.record_subtype)
+        elif isinstance(cam, DahuaCamera):
+            streams[cam.id + REC_SUFFIX] = stream_url(cam, subtype=1)
     data["streams"] = streams
     data["api"] = {**(data.get("api") or {}), "listen": cfg.go2rtc_api_listen}
     data["webrtc"] = {**(data.get("webrtc") or {}), "listen": cfg.webrtc_listen}
+    data["rtsp"] = {**(data.get("rtsp") or {}), "listen": ":8554"}
     return data
 
 
