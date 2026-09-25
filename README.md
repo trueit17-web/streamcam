@@ -1,11 +1,12 @@
 # streemcam
 
-Просмотр камер (RTSP, Dahua, Xiaomi) из Telegram и Discord для пользователей из белого списка.
+Просмотр камер (RTSP, Xiaomi, Tuya/Smart Life, Dahua) из Telegram и Discord для пользователей из белого списка.
 
 ## Быстрый старт
 
 1. `copy config.example.yaml config.yaml`, `copy .env.example .env`, заполнить.
    Секрет: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+   Сгенерировать и вписать ещё STREEMCAM_INTERNAL_KEY (той же командой).
 2. Cloudflare Zero Trust → Networks → Tunnels → Create tunnel → скопировать токен в
    `CLOUDFLARE_TUNNEL_TOKEN`. Public hostname: `cams.example.com` → `http://streemcam:8080`.
 3. `docker compose up -d --build`
@@ -31,9 +32,28 @@
 Mi Home. go2rtc сохранит ключ в `go2rtc/go2rtc.yaml` (streemcam его не перезаписывает).
 Там же видны `did` и `model` камер. Для получения ключей go2rtc нужен интернет.
 Список поддерживаемых моделей — в документации go2rtc (`internal/xiaomi`).
+Xiaomi Smart Camera C701 — model chuangmi.camera.079ae2 (поддерживается go2rtc ≥ 1.9.13).
 
-## Камеры Dahua
-`type: dahua`, `subtype: 1` — дополнительный поток (обычно H.264, работает во всех браузерах).
+## VPS и домашние камеры (WireGuard на роутере)
+Камеры Xiaomi отдают видео только в локальной сети, поэтому VPS должен видеть домашнюю подсеть:
+1. На VPS поднять WireGuard-сервер (например, `apt install wireguard`, интерфейс `wg0`, адрес `10.8.0.1/24`,
+   порт UDP 51820 открыт), в `AllowedIPs` пира-роутера указать `10.8.0.2/32, 192.168.1.0/24` (ваша домашняя подсеть).
+2. На роутере создать WireGuard-подключение к VPS (клиент), `AllowedIPs = 10.8.0.0/24`,
+   разрешить маршрутизацию/NAT из туннеля в домашнюю сеть.
+3. Проверить с VPS: `ping 192.168.1.31` (IP камеры). Контейнеры Docker ходят в эту подсеть через хост.
+4. Закрепить за камерами постоянные IP (DHCP-резервирование на роутере).
+
+## Камеры Tuya / Smart Life
+1. В `config.yaml`: `tuya.enabled: true`, в `.env` — `STREEMCAM_INTERNAL_KEY`.
+2. В приложении Smart Life / Tuya Smart: «Я» → ⚙ → «Аккаунт и безопасность» → «Код пользователя».
+3. В личке с ботом (админ): `/tuya_login <код>` → бот пришлёт QR → Smart Life → сканер → подтвердить.
+4. Камеры аккаунта появятся в плеере автоматически (`/tuya_status` — список, `/tuya_logout` — выход).
+Вход использует client_id интеграции Tuya из Home Assistant; если Tuya его заблокирует, вход перестанет работать.
+
+## Совместимый режим (H.265)
+C701 отдают H.265 — его показывают Safari/iOS и Chrome/Edge с аппаратным декодированием. Если видео чёрное,
+включите в плеере «Совместимый режим»: сервер перекодирует поток в H.264 720p. Одновременно — не больше
+`max_transcodes` таких просмотров.
 
 ## Изменение конфигурации
 

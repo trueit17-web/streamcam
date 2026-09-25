@@ -9,6 +9,17 @@ listen_port: 8080
 go2rtc_url: http://go2rtc:1984
 go2rtc_api_listen: ":1984"
 player_mode: mse          # через туннель; на VPS с открытым 8555: "webrtc,mse"
+max_transcodes: 2            # одновременных перекодировок «совместимого режима» (4 vCPU → 1–2)
+
+# Внутренний API для go2rtc (только docker-сеть, наружу не публикуется)
+internal_listen: "0.0.0.0:8081"
+internal_url: http://streemcam:8081
+internal_key: ${STREEMCAM_INTERNAL_KEY:-}
+
+tuya:
+  enabled: true              # камеры из Smart Life/Tuya Smart; вход — /tuya_login в Telegram
+  refresh_minutes: 10
+  snapshot_minutes: 15
 
 telegram:
   bot_token: ${TELEGRAM_BOT_TOKEN:-}
@@ -28,26 +39,31 @@ allow:
   discord: []
 
 cameras:
-  - id: yard
-    name: Двор
-    type: rtsp
-    url: rtsp://user:pass@192.168.1.10:554/stream1
-  - id: gate
-    name: Ворота
-    type: dahua
-    host: 192.168.1.20
-    user: admin
-    password: ${DAHUA_PASSWORD}
-    channel: 1
-    subtype: 1               # 0 — основной поток, 1 — дополнительный (обычно H.264)
-  - id: room
+  # Xiaomi Smart Camera C701 (H.265). Доступ по локальной сети (с VPS — через WireGuard на роутере).
+  - id: c701_hall
+    name: Прихожая
+    type: xiaomi
+    account: "1234567890"    # ID аккаунта Xiaomi (виден в WebUI go2rtc после входа)
+    region: de
+    host: 192.168.1.31
+    did: "111111111"
+    model: chuangmi.camera.079ae2
+  - id: c701_room
     name: Комната
     type: xiaomi
-    account: "1234567890"    # ID аккаунта Xiaomi (см. WebUI go2rtc после входа)
+    account: "1234567890"
     region: de
-    host: 192.168.1.30
-    did: "123456789"
-    model: chuangmi.camera.v2
+    host: 192.168.1.32
+    did: "222222222"
+    model: chuangmi.camera.079ae2
+  - id: c701_yard
+    name: Двор
+    type: xiaomi
+    account: "1234567890"
+    region: de
+    host: 192.168.1.33
+    did: "333333333"
+    model: chuangmi.camera.079ae2
   - id: test
     name: Тестовый поток
     type: rtsp
