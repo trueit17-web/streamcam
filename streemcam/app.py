@@ -9,11 +9,23 @@ from .access import Access
 from .catalog import Catalog
 from .config import Config
 from .db import Store
+from .go2rtc_sync import Go2rtcSync
 from .monitor import CameraMonitor
 from .streams import StreamRegistry
 from .web.server import create_app
 
 log = logging.getLogger(__name__)
+
+
+def parse_listen(value: str) -> tuple[str, int]:
+    host, _, port = value.rpartition(":")
+    return (host or "0.0.0.0"), int(port)
+
+
+async def sync_forever(sync, interval_seconds: float) -> None:
+    while True:
+        await sync.sync()
+        await asyncio.sleep(interval_seconds)
 
 
 async def supervise(name: str, factory: Callable[[], Awaitable[None]],
@@ -59,6 +71,7 @@ async def run(cfg: Config) -> None:
     access = build_access(cfg)
     catalog = Catalog(cfg)
     http = httpx.AsyncClient(base_url=cfg.go2rtc_url, timeout=20)
+    sync = Go2rtcSync(http, catalog, cfg.internal_url, cfg.internal_key)
 
     tg_bot = None
     if cfg.telegram.bot_token:
@@ -69,16 +82,37 @@ async def run(cfg: Config) -> None:
             from .tg.bot import notify_admins
             await notify_admins(tg_bot, cfg, alert_text(catalog, cfg, cam_id, online))
 
+    async def on_tuya_alert(text: str) -> None:
+        if tg_bot is not None:
+            from .tg.bot import notify_admins
+            await notify_admins(tg_bot, cfg, text)
+
+    tuya = None
+    if cfg.tuya.enabled:
+        from .tuya.service import TuyaService
+        from .tuya.store import TuyaStore
+        tuya = TuyaService(cfg, catalog, TuyaStore(cfg.db_path), sync=sync, on_alert=on_tuya_alert)
+        tuya.load()
+
     monitor = CameraMonitor(cfg, catalog, http, on_alert)
     app = create_app(cfg, catalog, access, monitor, access.registry, http)
     server = uvicorn.Server(uvicorn.Config(app, host=cfg.listen_host, port=cfg.listen_port,
                                            proxy_headers=True, forwarded_allow_ips="*"))
 
     background = [asyncio.create_task(supervise("monitor", monitor.run))]
+    if tuya is not None:
+        from .web.internal import create_internal_app
+        host, port = parse_listen(cfg.internal_listen)
+        internal = uvicorn.Server(uvicorn.Config(create_internal_app(catalog, tuya, cfg.internal_key),
+                                                 host=host, port=port, log_level="warning"))
+        background.append(asyncio.create_task(supervise("internal-api", internal.serve)))
+        background.append(asyncio.create_task(supervise("tuya", tuya.run)))
+    else:
+        background.append(asyncio.create_task(supervise("go2rtc-sync", lambda: sync_forever(sync, 600))))
     if tg_bot is not None:
         from .tg.bot import run_telegram
         background.append(asyncio.create_task(
-            supervise("telegram", lambda: run_telegram(tg_bot, cfg, access))))
+            supervise("telegram", lambda: run_telegram(tg_bot, cfg, access, tuya))))
     else:
         log.info("telegram bot disabled (no token)")
     if cfg.discord.bot_token:

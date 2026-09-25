@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from streemcam.app import alert_text, make_tg_bot, supervise
+from streemcam.app import alert_text, make_tg_bot, parse_listen, supervise, sync_forever
 from streemcam.catalog import Catalog
 
 
@@ -42,3 +42,23 @@ async def test_supervise_restarts_after_crash():
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def test_parse_listen():
+    assert parse_listen("127.0.0.1:8081") == ("127.0.0.1", 8081)
+    assert parse_listen("0.0.0.0:8081") == ("0.0.0.0", 8081)
+    assert parse_listen(":8081") == ("0.0.0.0", 8081)
+
+
+async def test_sync_forever_repeats():
+    class S:
+        n = 0
+
+        async def sync(self):
+            S.n += 1
+
+    task = asyncio.create_task(sync_forever(S(), 0))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    task.cancel()
+    assert S.n >= 2
