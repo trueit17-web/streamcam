@@ -35,6 +35,15 @@ Mi Home. go2rtc сохранит ключ в `go2rtc/go2rtc.yaml` (streemcam е�
 ## Камеры Dahua
 `type: dahua`, `subtype: 1` — дополнительный поток (обычно H.264, работает во всех браузерах).
 
+## Изменение конфигурации
+
+`go2rtc.yaml` генерируется только одноразовым сервисом `go2rtc-config` — go2rtc и streemcam
+его не перечитывают сами. После правки `config.yaml`:
+
+- Docker: `docker compose up -d --force-recreate go2rtc-config go2rtc streemcam`
+- Без Docker: заново выполнить `python -m streemcam render-go2rtc`, затем перезапустить go2rtc
+  и streemcam.
+
 ## Без Docker
 `pip install .`, поменять адреса в конфиге (см. комментарии), затем
 `python -m streemcam render-go2rtc`, запустить go2rtc с `go2rtc/go2rtc.yaml`, `python -m streemcam run`.

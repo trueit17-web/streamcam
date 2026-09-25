@@ -16,8 +16,9 @@ services:
       - ./go2rtc:/config
     ports:
       - "127.0.0.1:1984:1984"   # WebUI только локально (вход в аккаунт Xiaomi)
-      - "8555:8555/tcp"         # WebRTC (нужен только при прямом доступе, не через туннель)
-      - "8555:8555/udp"
+      # раскомментируйте на VPS для WebRTC (и player_mode: webrtc,mse)
+      # - "8555:8555/tcp"
+      # - "8555:8555/udp"
     restart: unless-stopped
 
   streemcam:
