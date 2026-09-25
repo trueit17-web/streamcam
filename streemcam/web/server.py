@@ -16,8 +16,9 @@ from websockets.exceptions import WebSocketException as UpstreamError
 from ..access import Access, AccessDenied
 from ..catalog import Catalog
 from ..config import Config
+from ..go2rtc_sync import compat_name
 from ..identity import Identity
-from ..streams import StreamLimitError, StreamRegistry
+from ..streams import StreamLimitError, StreamRegistry, TranscodeLimiter
 from ..tg_auth import TgAuthError
 from ..tokens import TokenError
 
@@ -99,6 +100,7 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
                http: httpx.AsyncClient, upstream_connect=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     upstream_connect = upstream_connect or default_upstream(cfg.go2rtc_url)
+    transcodes = TranscodeLimiter(cfg.max_transcodes)
 
     def current_user(request: Request, s: str | None = None) -> Identity:
         token = s
@@ -139,6 +141,7 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
         return {
             "player_mode": cfg.player_mode,
             "max_streams": cfg.max_streams_per_user,
+            "max_transcodes": cfg.max_transcodes,
             "cameras": [{"id": c.id, "name": c.name, "kind": c.kind, "online": monitor.is_online(c.id)}
                         for c in catalog.all()],
         }
@@ -161,7 +164,7 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
                         headers={"Cache-Control": "public, max-age=3600"})
 
     @app.websocket("/api/ws")
-    async def ws_proxy(ws: WebSocket, src: str = "", s: str = ""):
+    async def ws_proxy(ws: WebSocket, src: str = "", s: str = "", compat: int = 0):
         try:
             ident = access.check_session(s)
         except TokenError:
@@ -173,6 +176,10 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
         if catalog.get(src) is None:
             await ws.close(code=4404)
             return
+        upstream_name = compat_name(src) if compat else src
+        if compat and not transcodes.try_acquire():
+            await ws.close(code=4430)
+            return
 
         kicked = asyncio.Event()
 
@@ -182,20 +189,24 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
         try:
             registry.acquire(ident, closer)
         except StreamLimitError:
+            if compat:
+                transcodes.release()
             await ws.close(code=4429)
             return
 
         close_code = 1000
         try:
             await ws.accept()
-            async with upstream_connect(src) as upstream:
+            async with upstream_connect(upstream_name) as upstream:
                 if await _pump(ws, upstream, kicked):
                     close_code = 1011
         except (WebSocketDisconnect, UpstreamError, OSError) as e:
-            log.info("stream %s for %s ended: %r", src, ident, e)
+            log.info("stream %s for %s ended: %r", upstream_name, ident, e)
             close_code = 1011
         finally:
             registry.release(ident, closer)
+            if compat:
+                transcodes.release()
         if kicked.is_set():
             close_code = 4403  # kick always takes precedence
         with contextlib.suppress(Exception):

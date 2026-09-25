@@ -24,6 +24,7 @@ def test_tg_session_and_cameras(web):
     body = r.json()
     assert body["player_mode"] == "mse"
     assert body["max_streams"] == 4
+    assert body["max_transcodes"] == 2
     assert body["cameras"] == [
         {"id": "yard", "name": "Двор", "kind": "config", "online": True},
         {"id": "gate", "name": "Ворота", "kind": "config", "online": False},

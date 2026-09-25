@@ -1,7 +1,7 @@
 import pytest
 
 from streemcam.identity import Identity
-from streemcam.streams import StreamLimitError, StreamRegistry
+from streemcam.streams import StreamLimitError, StreamRegistry, TranscodeLimiter
 
 A = Identity("tg", 42)
 
@@ -60,3 +60,14 @@ async def test_kick_calls_all_closers_even_if_one_fails():
     assert "failing" in log
     assert "success" in log
     assert r.count(A) == 0
+
+
+def test_transcode_limiter():
+    t = TranscodeLimiter(2)
+    assert t.try_acquire() and t.try_acquire()
+    assert not t.try_acquire()
+    assert t.active == 2
+    t.release()
+    assert t.try_acquire()
+    t.release(); t.release(); t.release()  # лишний release не уходит в минус
+    assert t.active == 0

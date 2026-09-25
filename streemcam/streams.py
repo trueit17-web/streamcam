@@ -40,3 +40,20 @@ class StreamRegistry:
         for closer, result in zip(closers, results):
             if isinstance(result, Exception):
                 logger.warning(f"Failed to close stream for {ident}: {result!r}")
+
+
+class TranscodeLimiter:
+    """Глобальный лимит одновременных перекодировок (совместимый режим)."""
+
+    def __init__(self, maximum: int):
+        self._max = maximum
+        self.active = 0
+
+    def try_acquire(self) -> bool:
+        if self.active >= self._max:
+            return False
+        self.active += 1
+        return True
+
+    def release(self) -> None:
+        self.active = max(0, self.active - 1)

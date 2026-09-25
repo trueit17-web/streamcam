@@ -11,7 +11,7 @@ from streemcam.identity import Identity
 USER = Identity("tg", 42)
 
 
-def _close_and_wait_released(client, web, ws, ident=USER, timeout=2.0):
+def _close_and_wait_released(client, web, ws, ident=USER, timeout=2.0, expected=0):
     """Close the socket and wait until the server has released its stream slot.
 
     Works around a Starlette TestClient race: leaving `websocket_connect(...)`
@@ -27,9 +27,11 @@ def _close_and_wait_released(client, web, ws, ident=USER, timeout=2.0):
     """
     ws.close()
     deadline = time.monotonic() + timeout
-    while web.registry.count(ident) != 0:
+    while web.registry.count(ident) != expected:
         if time.monotonic() > deadline:
-            raise AssertionError(f"stream for {ident} was not released within {timeout}s")
+            raise AssertionError(
+                f"stream for {ident} was not released to {expected} within {timeout}s"
+            )
         client.portal.call(asyncio.sleep, 0.01)
 
 
@@ -159,4 +161,42 @@ def test_deny_kicks_open_stream(web):
             with pytest.raises(WebSocketDisconnect) as e:
                 ws.receive_text()
             assert e.value.code == 4403
+            _close_and_wait_released(client, web, ws)
+
+
+def recording_connect(log):
+    @asynccontextmanager
+    async def connect(src):
+        log.append(src)
+        from conftest import FakeUpstream
+        yield FakeUpstream(src)
+    return connect
+
+
+def test_compat_uses_h264_stream(make_web, cfg):
+    connected = []
+    web = make_web(cfg, upstream_connect=recording_connect(connected))
+    with TestClient(web.app) as client:
+        with client.websocket_connect(ws_url(web) + "&compat=1") as ws:
+            ws.send_text("x")
+            assert ws.receive_text() == "echo:x"
+            _close_and_wait_released(client, web, ws)
+    assert connected == ["yard~h264"]
+
+
+def test_transcode_limit(make_web, make_cfg):
+    connected = []
+    web = make_web(make_cfg(max_transcodes=1), upstream_connect=recording_connect(connected))
+    with TestClient(web.app) as client:
+        with client.websocket_connect(ws_url(web) + "&compat=1") as ws:
+            ws.send_text("x")
+            ws.receive_text()
+            with pytest.raises(WebSocketDisconnect) as e:
+                with client.websocket_connect(ws_url(web, src="gate") + "&compat=1"):
+                    pass
+            assert e.value.code == 4430
+            with client.websocket_connect(ws_url(web, src="gate")) as ws2:  # без compat — можно
+                ws2.send_text("y")
+                assert ws2.receive_text() == "echo:y"
+                _close_and_wait_released(client, web, ws2, expected=1)
             _close_and_wait_released(client, web, ws)

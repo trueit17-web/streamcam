@@ -4,6 +4,11 @@ const $ = (sel) => document.querySelector(sel);
 const tg = window.Telegram?.WebApp;
 let token = null;
 let info = null;
+let currentCams = [];
+function loadCompat() {
+  try { return localStorage.getItem("sc_compat") === "1"; } catch { return false; }
+}
+let compat = loadCompat();
 
 function store(key, value) {
   try { sessionStorage.setItem(key, value); } catch {}
@@ -91,7 +96,8 @@ function snapshotUrl(id) {
 }
 
 function streamUrl(id) {
-  return `${location.origin}/api/ws?src=${encodeURIComponent(id)}&s=${encodeURIComponent(token)}`;
+  const extra = compat ? "&compat=1" : "";
+  return `${location.origin}/api/ws?src=${encodeURIComponent(id)}&s=${encodeURIComponent(token)}${extra}`;
 }
 
 function statusText(online) {
@@ -152,6 +158,7 @@ function player(cam) {
 
 function openCameras(cams) {
   stopPlayers();
+  currentCams = cams;
   const viewer = $("#viewer");
   viewer.className = cams.length > 1 ? "grid" : "single";
   viewer.replaceChildren(...cams.map(player));
@@ -165,6 +172,17 @@ function openCameras(cams) {
 
 $("#back").onclick = () => { stopPlayers(); history.replaceState(null, "", location.pathname); renderList(); };
 $("#grid").onclick = () => openCameras(info.cameras.slice(0, info.max_streams));
+function applyCompatUi() {
+  $("#compat").checked = compat;
+  $("#compat-hint").hidden = !compat;
+}
+$("#compat").onchange = () => {
+  compat = $("#compat").checked;
+  try { localStorage.setItem("sc_compat", compat ? "1" : "0"); } catch {}
+  applyCompatUi();
+  if (!$("#viewer").hidden && currentCams.length) openCameras(currentCams);
+};
+applyCompatUi();
 
 async function main() {
   try {

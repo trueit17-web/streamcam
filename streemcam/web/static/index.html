@@ -11,9 +11,13 @@
   <header>
     <button id="back" hidden>← Назад</button>
     <h1 id="title">Камеры</h1>
+    <label id="compat-wrap" title="Перекодировать видео в H.264 на сервере — для устройств без поддержки H.265">
+      <input type="checkbox" id="compat"> Совместимый режим
+    </label>
     <button id="grid" hidden>Сетка</button>
   </header>
   <main>
+    <p id="compat-hint" hidden>Совместимый режим перекодирует видео на сервере, одновременно доступно ограниченное число таких просмотров. Если видео не появляется — выключите режим или попробуйте позже.</p>
     <p id="message" hidden></p>
     <ul id="cams" hidden></ul>
     <section id="viewer" hidden></section>

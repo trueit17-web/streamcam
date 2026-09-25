@@ -28,3 +28,5 @@ main { padding: 0 16px 16px; }
 .player .bar span { flex: 1; }
 .player:fullscreen video-stream { height: 100%; aspect-ratio: auto; }
 .player:fullscreen .bar { position: absolute; bottom: 0; left: 0; right: 0; opacity: .8; }
+#compat-wrap { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+#compat-hint { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
