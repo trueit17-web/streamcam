@@ -2,7 +2,19 @@ import asyncio
 
 import pytest
 
-from streemcam.app import alert_text, supervise
+from streemcam.app import alert_text, make_tg_bot, supervise
+
+
+def test_make_tg_bot_returns_none_for_invalid_token(caplog):
+    with caplog.at_level("ERROR"):
+        bot = make_tg_bot("bad-token")
+    assert bot is None
+    assert "telegram" in caplog.text.lower()
+
+
+def test_make_tg_bot_returns_bot_for_valid_token():
+    bot = make_tg_bot("123456:TEST-TOKEN-abcdefghij")
+    assert bot is not None
 
 
 def test_alert_text(cfg):

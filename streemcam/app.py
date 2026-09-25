@@ -42,14 +42,25 @@ def build_access(cfg: Config) -> Access:
     return Access(cfg, Store(cfg.db_path), StreamRegistry(cfg.max_streams_per_user))
 
 
+def make_tg_bot(bot_token: str):
+    """Строит aiogram Bot, но не даёт невалидному токену уронить всё приложение."""
+    from aiogram import Bot
+    from aiogram.utils.token import TokenValidationError
+
+    try:
+        return Bot(bot_token)
+    except TokenValidationError:
+        log.error("telegram bot disabled: invalid bot token")
+        return None
+
+
 async def run(cfg: Config) -> None:
     access = build_access(cfg)
     http = httpx.AsyncClient(base_url=cfg.go2rtc_url, timeout=20)
 
     tg_bot = None
     if cfg.telegram.bot_token:
-        from aiogram import Bot
-        tg_bot = Bot(cfg.telegram.bot_token)
+        tg_bot = make_tg_bot(cfg.telegram.bot_token)
 
     async def on_alert(cam_id: str, online: bool) -> None:
         if tg_bot is not None:
