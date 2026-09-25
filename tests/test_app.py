@@ -62,3 +62,25 @@ async def test_sync_forever_repeats():
         await asyncio.sleep(0)
     task.cancel()
     assert S.n >= 2
+
+
+async def test_cleanup_forever_calls_cleanup(make_cfg, tmp_path):
+    from datetime import datetime, timezone
+    from streemcam.app import cleanup_forever
+
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path), "retention_days": 3, "min_free_gb": 1})
+    calls = []
+
+    class A:
+        def cleanup(self, today, retention_days, min_free_gb):
+            calls.append((today.isoformat(), retention_days, min_free_gb))
+            return []
+
+    task = asyncio.create_task(cleanup_forever(
+        A(), cfg, 0, now=lambda: datetime(2026, 9, 25, 22, 0, tzinfo=timezone.utc)))
+    for _ in range(50):
+        await asyncio.sleep(0)
+        if len(calls) >= 2:
+            break
+    task.cancel()
+    assert calls[0] == ("2026-09-26", 3, 1)   # 22:00 UTC = 01:00 MSK следующего дня

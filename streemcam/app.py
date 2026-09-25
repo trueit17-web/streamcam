@@ -1,6 +1,8 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 import uvicorn
@@ -25,6 +27,16 @@ def parse_listen(value: str) -> tuple[str, int]:
 async def sync_forever(sync, interval_seconds: float) -> None:
     while True:
         await sync.sync()
+        await asyncio.sleep(interval_seconds)
+
+
+async def cleanup_forever(archive, cfg: Config, interval_seconds: float, now=None) -> None:
+    from .recording.schedule import local_now
+    now = now or (lambda: datetime.now(timezone.utc))
+    while True:
+        today = local_now(now(), cfg.recording).date()
+        await asyncio.to_thread(archive.cleanup, today, cfg.recording.retention_days,
+                                cfg.recording.min_free_gb)
         await asyncio.sleep(interval_seconds)
 
 
@@ -94,8 +106,15 @@ async def run(cfg: Config) -> None:
         tuya = TuyaService(cfg, catalog, TuyaStore(cfg.db_path), sync=sync, on_alert=on_tuya_alert)
         tuya.load()
 
+    archive = recorder = None
+    if cfg.recording.enabled:
+        from .recording.archive import Archive
+        from .recording.recorder import Recorder
+        archive = Archive(Path(cfg.recording.path), catalog)
+        recorder = Recorder(cfg, catalog, on_alert=on_tuya_alert)
+
     monitor = CameraMonitor(cfg, catalog, http, on_alert)
-    app = create_app(cfg, catalog, access, monitor, access.registry, http)
+    app = create_app(cfg, catalog, access, monitor, access.registry, http, archive=archive)
     server = uvicorn.Server(uvicorn.Config(app, host=cfg.listen_host, port=cfg.listen_port,
                                            proxy_headers=True, forwarded_allow_ips="*"))
 
@@ -124,6 +143,10 @@ async def run(cfg: Config) -> None:
         background.append(asyncio.create_task(supervise("discord", lambda: run_discord(cfg, catalog, access))))
     else:
         log.info("discord bot disabled (no token)")
+    if recorder is not None:
+        background.append(asyncio.create_task(supervise("recorder", recorder.run)))
+        background.append(asyncio.create_task(
+            supervise("archive-cleanup", lambda: cleanup_forever(archive, cfg, 3600))))
 
     try:
         await server.serve()
