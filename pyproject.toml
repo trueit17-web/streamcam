@@ -30,3 +30,5 @@ streemcam = ["web/static/*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Silence starlette.testclient's httpx deprecation warning (third-party, not our code)
+filterwarnings = ["ignore:Using.*httpx.*starlette.testclient.*deprecated"]
