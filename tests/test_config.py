@@ -62,6 +62,16 @@ def test_load_config_expands_env(tmp_path, monkeypatch, base_data):
     assert cfg.telegram.bot_token is None
 
 
+@pytest.mark.parametrize("secret", [
+    "замените-на-случайную-строку-от-32-символов",
+    "please-change-me-please-change-me",
+    "CHANGEME-CHANGEME-CHANGEME-1234",
+])
+def test_placeholder_secret_rejected(make_cfg, secret):
+    with pytest.raises(ConfigError, match="secret"):
+        make_cfg(secret=secret)
+
+
 def test_load_config_missing_env_fails(tmp_path, monkeypatch, base_data):
     monkeypatch.delenv("SC_MISSING", raising=False)
     base_data["secret"] = "${SC_MISSING}"

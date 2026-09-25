@@ -77,6 +77,18 @@ class DiscordConfig(_BotConfig):
 class Config(BaseModel):
     public_url: str
     secret: str = Field(min_length=16)
+
+    @field_validator("secret")
+    @classmethod
+    def _reject_placeholder_secret(cls, v: str) -> str:
+        lowered = v.lower()
+        for placeholder in ("замените", "change-me", "changeme"):
+            if placeholder in lowered:
+                raise ValueError(
+                    "secret looks like a placeholder value from .env.example; "
+                    'generate a real one: python -c "import secrets; print(secrets.token_urlsafe(32))"'
+                )
+        return v
     listen_host: str = "127.0.0.1"
     listen_port: int = 8080
     session_ttl_hours: int = 12
