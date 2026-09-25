@@ -86,12 +86,24 @@ Dahua остаётся в коде, но убирается из примеро�
 - Все потребители `cfg.cameras` / `cfg.camera()` (web, monitor, tg, dc, app) переходят на `Catalog`.
 
 ### Синхронизация с go2rtc (`go2rtc_sync.py`, новый)
-- `async sync(http, catalog, internal_key, internal_url)`: для каждой камеры Tuya
-  `PUT /api/streams?name=tuya_<id>&src=echo:curl -fsS <internal_url>/tuya/<device_id>?key=<key>`;
-  для каждой камеры (config и Tuya) — `PUT /api/streams?name=<id>~h264&src=ffmpeg:<id>#video=h264#width=1280#audio=opus`;
-  удаляет потоки `tuya_*` и `*~h264`, которых больше нет в каталоге (`DELETE /api/streams?src=<name>`).
-- Вызывается: при старте, после входа/выхода Tuya, после каждого обновления списка (10 мин).
-- Ошибка go2rtc → лог, повтор при следующей синхронизации.
+go2rtc валидирует любой источник, добавленный через HTTP API `/api/streams` (`PUT`/`PATCH`), и отклоняет
+(400) источники со схемой `echo:`/`exec:` или с пробелами внутри — т.е. `echo:curl -fsS …` через этот API
+зарегистрировать нельзя. Потоки, загруженные из YAML-файла конфига go2rtc, этой проверке не подвергаются.
+Поэтому синхронизация управляет только потоками `tuya_*` через файл конфига:
+- `Go2rtcSync.sync()` (под `asyncio.Lock`, вызывается при старте, после входа/выхода Tuya и после каждого
+  обновления списка камер Tuya): считает желаемое состояние — для каждой камеры Tuya в каталоге (только
+  если задан `internal_key`) `tuya_<id>` = `echo:curl -fsS <internal_url>/tuya/<device_id>?key=<key>` и
+  `tuya_<id>~h264` = `ffmpeg:tuya_<id>#video=h264#width=1280#audio=aac`.
+- `GET /api/config` (текст YAML); при ошибке транспорта/не-200/невалидном YAML — лог и выход без записи.
+  Сравнивает текущие записи `streams`, чьё имя начинается с `tuya_`, с желаемыми (значение может быть
+  строкой или списком из одного элемента — нормализуется); при совпадении ничего не пишет.
+- Иначе собирает новый конфиг: все остальные ключи и потоки (включая `xiaomi:` и т. п.) сохраняются как
+  есть, записи `tuya_*` заменяются на желаемые; `POST /api/config` с телом — `yaml.safe_dump(...)`; при
+  не-2xx — лог и выход; иначе `POST /api/restart` (go2rtc перечитывает конфиг и перезапускается — текущие
+  зрители переподключаются).
+- Потоки `<id>~h264` для камер из `config.yaml` рендерит одноразовый сервис `render-go2rtc`
+  (`go2rtc_config.py`), а не `Go2rtcSync` — они не требуют динамики.
+- Ошибка go2rtc на любом шаге → лог, повтор при следующей синхронизации.
 
 ### Внутренний сервер (`web/internal.py`, новый)
 - Отдельное FastAPI-приложение на `internal_listen` (`0.0.0.0:8081` в docker; порт не публикуется).
@@ -148,7 +160,8 @@ Dahua остаётся в коде, но убирается из примеро�
 - store: save/load/update_token/clear.
 - client: мок `Manager` — фильтр `sp`, `allocate_rtsp` (успех, `None` → `TuyaError`), слушатель токенов → store.
 - catalog: слияние, ID, `get`, `tuya_device_id`, запрет `tuya_`/`~` в конфиге.
-- go2rtc_sync: MockTransport — ожидаемые PUT/DELETE, экранирование, отказ при плохом `device_id`.
+- go2rtc_sync: MockTransport — GET/POST `/api/config` + `/api/restart`, отсутствие записи при совпадении,
+  сохранение чужих ключей/потоков, ошибки транспорта на каждом шаге, отказ при плохом `device_id`.
 - internal: 403/404/502/503/200.
 - web: `/api/cameras` с Tuya; WS `compat=1` → `~h264`; лимит → 4430.
 - tg: `/tuya_login` (мок login + мок bot), `/tuya_status`, `/tuya_logout`, права.
