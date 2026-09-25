@@ -79,3 +79,41 @@ def test_load_config_missing_env_fails(tmp_path, monkeypatch, base_data):
     path.write_text(yaml.safe_dump(base_data, allow_unicode=True), encoding="utf-8")
     with pytest.raises(ConfigError, match="SC_MISSING"):
         load_config(path)
+
+
+def test_tuya_defaults(cfg):
+    assert cfg.tuya.enabled is False
+    assert cfg.tuya.refresh_minutes == 10
+    assert cfg.tuya.snapshot_minutes == 15
+    assert cfg.max_transcodes == 2
+    assert cfg.internal_listen == "127.0.0.1:8081"
+    assert cfg.internal_url == "http://127.0.0.1:8081"
+    assert cfg.internal_key is None
+
+
+def test_tuya_enabled_requires_internal_key(make_cfg):
+    with pytest.raises(ConfigError, match="internal_key"):
+        make_cfg(tuya={"enabled": True})
+    cfg = make_cfg(tuya={"enabled": True}, internal_key="k" * 16)
+    assert cfg.internal_key == "k" * 16
+
+
+@pytest.mark.parametrize("key", ["short", "has space 0123456789", "bad/char-0123456789"])
+def test_internal_key_format(make_cfg, key):
+    with pytest.raises(ConfigError, match="internal_key"):
+        make_cfg(internal_key=key)
+
+
+def test_empty_internal_key_is_none(make_cfg):
+    assert make_cfg(internal_key="").internal_key is None
+
+
+def test_internal_url_trailing_slash_stripped(make_cfg):
+    assert make_cfg(internal_url="http://streemcam:8081/").internal_url == "http://streemcam:8081"
+
+
+def test_config_camera_id_cannot_start_with_tuya(make_cfg, base_data):
+    cams = base_data["cameras"]
+    cams[0]["id"] = "tuya_abc"
+    with pytest.raises(ConfigError, match="tuya_"):
+        make_cfg(cameras=cams)

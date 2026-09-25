@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 CAMERA_ID = r"^[a-z0-9_-]+$"
+INTERNAL_KEY = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 _ENV_RE = re.compile(r"\$\{(\w+)(?::-([^}]*))?\}")
 
 
@@ -74,6 +75,12 @@ class DiscordConfig(_BotConfig):
     guild_ids: list[int] = []
 
 
+class TuyaConfig(BaseModel):
+    enabled: bool = False
+    refresh_minutes: int = 10
+    snapshot_minutes: int = 15
+
+
 class Config(BaseModel):
     public_url: str
     secret: str = Field(min_length=16)
@@ -101,6 +108,11 @@ class Config(BaseModel):
     db_path: str = "data/streemcam.db"
     probe_interval_seconds: int = 60
     offline_alert_minutes: int = 5
+    max_transcodes: int = 2
+    internal_listen: str = "127.0.0.1:8081"
+    internal_url: str = "http://127.0.0.1:8081"
+    internal_key: str | None = None
+    tuya: TuyaConfig = TuyaConfig()
     telegram: TelegramConfig = TelegramConfig()
     discord: DiscordConfig = DiscordConfig()
     admins: UserLists = UserLists()
@@ -112,13 +124,31 @@ class Config(BaseModel):
     def _strip_slash(cls, v: str) -> str:
         return v.rstrip("/")
 
+    @field_validator("internal_url")
+    @classmethod
+    def _strip_internal_slash(cls, v: str) -> str:
+        return v.rstrip("/")
+
+    @field_validator("internal_key", mode="before")
+    @classmethod
+    def _internal_key_format(cls, v):
+        if not v:
+            return None
+        if not INTERNAL_KEY.match(v):
+            raise ValueError("internal_key must match ^[A-Za-z0-9_-]{16,}$")
+        return v
+
     @model_validator(mode="after")
-    def _unique_camera_ids(self):
+    def _check_cameras_and_tuya(self):
         seen = set()
         for cam in self.cameras:
             if cam.id in seen:
                 raise ValueError(f"duplicate camera id: {cam.id}")
+            if cam.id.startswith("tuya_"):
+                raise ValueError(f"camera id must not start with tuya_: {cam.id}")
             seen.add(cam.id)
+        if self.tuya.enabled and not self.internal_key:
+            raise ValueError("internal_key is required when tuya.enabled is true")
         return self
 
     def camera(self, cam_id: str) -> Camera | None:
