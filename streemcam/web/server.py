@@ -1,20 +1,66 @@
+import asyncio
+import contextlib
 import logging
+from urllib.parse import urlencode
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from starlette.websockets import WebSocketDisconnect
+from websockets.asyncio.client import connect as ws_connect
+from websockets.exceptions import WebSocketException as UpstreamError
 
 from ..access import Access, AccessDenied
 from ..config import Config
 from ..identity import Identity
-from ..streams import StreamRegistry
+from ..streams import StreamLimitError, StreamRegistry
 from ..tg_auth import TgAuthError
 from ..tokens import TokenError
 
 log = logging.getLogger(__name__)
 
 GO2RTC_JS = {"video-rtc.js", "video-stream.js"}
+
+
+def default_upstream(go2rtc_url: str):
+    ws_base = "ws" + go2rtc_url[4:] if go2rtc_url.startswith("http") else go2rtc_url
+
+    def connect(src: str):
+        return ws_connect(f"{ws_base}/api/ws?{urlencode({'src': src})}", max_size=None)
+    return connect
+
+
+async def _pump(ws: WebSocket, upstream, kicked: asyncio.Event) -> None:
+    async def client_to_upstream():
+        while True:
+            msg = await ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                return
+            if msg.get("text") is not None:
+                await upstream.send(msg["text"])
+            elif msg.get("bytes") is not None:
+                await upstream.send(msg["bytes"])
+
+    async def upstream_to_client():
+        async for msg in upstream:
+            if isinstance(msg, bytes):
+                await ws.send_bytes(msg)
+            else:
+                await ws.send_text(msg)
+
+    tasks = [asyncio.create_task(client_to_upstream()),
+             asyncio.create_task(upstream_to_client()),
+             asyncio.create_task(kicked.wait())]
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for t in done:
+            if not t.cancelled() and t.exception() is not None:
+                log.debug("stream pump ended: %r", t.exception())
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 class TgSessionIn(BaseModel):
@@ -32,6 +78,7 @@ def _denied(ident: Identity) -> JSONResponse:
 def create_app(cfg: Config, access: Access, monitor, registry: StreamRegistry,
                http: httpx.AsyncClient, upstream_connect=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    upstream_connect = upstream_connect or default_upstream(cfg.go2rtc_url)
 
     def current_user(request: Request, s: str | None = None) -> Identity:
         token = s
@@ -92,5 +139,45 @@ def create_app(cfg: Config, access: Access, monitor, registry: StreamRegistry,
             raise HTTPException(502, "go2rtc unavailable")
         return Response(r.content, media_type="application/javascript",
                         headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.websocket("/api/ws")
+    async def ws_proxy(ws: WebSocket, src: str = "", s: str = ""):
+        try:
+            ident = access.check_session(s)
+        except TokenError:
+            await ws.close(code=4401)
+            return
+        except AccessDenied:
+            await ws.close(code=4403)
+            return
+        if cfg.camera(src) is None:
+            await ws.close(code=4404)
+            return
+
+        kicked = asyncio.Event()
+
+        async def closer():
+            kicked.set()
+
+        try:
+            registry.acquire(ident, closer)
+        except StreamLimitError:
+            await ws.close(code=4429)
+            return
+
+        close_code = 1000
+        try:
+            await ws.accept()
+            async with upstream_connect(src) as upstream:
+                await _pump(ws, upstream, kicked)
+            if kicked.is_set():
+                close_code = 4403
+        except (WebSocketDisconnect, UpstreamError, OSError) as e:
+            log.info("stream %s for %s ended: %r", src, ident, e)
+            close_code = 1011
+        finally:
+            registry.release(ident, closer)
+        with contextlib.suppress(Exception):
+            await ws.close(code=close_code)
 
     return app
