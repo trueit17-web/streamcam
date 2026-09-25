@@ -18,6 +18,7 @@ from ..catalog import Catalog
 from ..config import Config
 from ..go2rtc_sync import compat_name
 from ..identity import Identity
+from ..recording.archive import Archive
 from ..streams import StreamLimitError, StreamRegistry, TranscodeLimiter
 from ..tg_auth import TgAuthError
 from ..tokens import TokenError
@@ -97,7 +98,7 @@ def _denied(ident: Identity) -> JSONResponse:
 
 
 def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry: StreamRegistry,
-               http: httpx.AsyncClient, upstream_connect=None) -> FastAPI:
+               http: httpx.AsyncClient, upstream_connect=None, archive: Archive | None = None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     upstream_connect = upstream_connect or default_upstream(cfg.go2rtc_url)
     transcodes = TranscodeLimiter(cfg.max_transcodes)
@@ -142,6 +143,7 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
             "player_mode": cfg.player_mode,
             "max_streams": cfg.max_streams_per_user,
             "max_transcodes": cfg.max_transcodes,
+            "recording": archive is not None,
             "cameras": [{"id": c.id, "name": c.name, "kind": c.kind, "online": monitor.is_online(c.id)}
                         for c in catalog.all()],
         }
@@ -152,6 +154,37 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
         if data is None:
             raise HTTPException(404, "no snapshot")
         return Response(data, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    def _archive() -> Archive:
+        if archive is None:
+            raise HTTPException(404, "recording disabled")
+        return archive
+
+    @app.get("/api/archive/{cam_id}/days")
+    async def archive_days(cam_id: str, user: Identity = Depends(current_user)):
+        days = _archive().days(cam_id)
+        if days is None:
+            raise HTTPException(404, "unknown camera")
+        return {"days": days}
+
+    @app.get("/api/archive/{cam_id}/{day}")
+    async def archive_hours(cam_id: str, day: str, user: Identity = Depends(current_user)):
+        hours = _archive().hours(cam_id, day)
+        if hours is None:
+            raise HTTPException(404, "not found")
+        return {"hours": [{"name": e.name, "hour": e.hour, "size": e.size, "recording": e.recording}
+                          for e in hours]}
+
+    @app.get("/api/archive/{cam_id}/{day}/{name}.mp4")
+    async def archive_file(cam_id: str, day: str, name: str, download: int = 0,
+                           user: Identity = Depends(current_user)):
+        path = _archive().file(cam_id, day, name)
+        if path is None:
+            raise HTTPException(404, "not found")
+        if download:
+            return FileResponse(path, media_type="video/mp4",
+                                filename=f"{cam_id}_{day}_{name}.mp4")
+        return FileResponse(path, media_type="video/mp4")
 
     @app.get("/go2rtc/{name}")
     async def go2rtc_js(name: str):

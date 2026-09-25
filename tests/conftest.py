@@ -102,7 +102,12 @@ def make_web():
         http = httpx.AsyncClient(base_url="http://go2rtc", transport=httpx.MockTransport(_go2rtc_http))
         catalog = Catalog(cfg)
         app = create_app(cfg, catalog, access, StubMonitor(), registry, http, upstream_connect=upstream_connect)
-        return SimpleNamespace(app=app, access=access, registry=registry, catalog=catalog)
+
+        def make_app(**kwargs):
+            return create_app(cfg, catalog, access, StubMonitor(), registry, http,
+                              upstream_connect=upstream_connect, **kwargs)
+
+        return SimpleNamespace(app=app, access=access, registry=registry, catalog=catalog, make_app=make_app)
     return make
 
 
