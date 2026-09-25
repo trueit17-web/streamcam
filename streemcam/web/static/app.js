@@ -23,9 +23,18 @@ function load(key) {
 // в лимит max_streams_per_user. Поэтому перед заменой #viewer явно отключаем
 // все текущие плееры.
 function stopPlayers() {
-  for (const el of document.querySelectorAll("#viewer video-stream")) {
+  for (const el of document.querySelectorAll("#viewer video-stream, #cams video-stream")) {
     el.ondisconnect?.();
   }
+}
+
+// VideoRTC creates its internal <video> element when it is connected to the
+// document; that can happen a tick after we set .src, so try immediately and
+// again on the next frame.
+function muteWhenReady(el) {
+  const apply = () => { if (el.video) el.video.muted = true; };
+  apply();
+  requestAnimationFrame(apply);
 }
 
 function showMessage(text) {
@@ -106,23 +115,84 @@ function statusText(online) {
   return online === true ? "онлайн" : online === false ? "офлайн" : "проверяется";
 }
 
+function cardSnapshotImg(cam) {
+  const img = document.createElement("img");
+  img.alt = cam.name;
+  img.src = snapshotUrl(cam.id);
+  img.onerror = () => { img.removeAttribute("src"); };
+  return img;
+}
+
+// Останавливает inline-плеер карточки и возвращает снимок вместо видео.
+function stopInlineCard(li, cam) {
+  const video = li.querySelector("video-stream");
+  if (video) {
+    video.ondisconnect?.();
+    video.replaceWith(cardSnapshotImg(cam));
+  }
+  li.querySelector(".card-bar")?.remove();
+}
+
+function inlineCardBar(li, cam, video) {
+  const bar = document.createElement("div");
+  bar.className = "card-bar";
+  const stop = document.createElement("button");
+  stop.textContent = "⏹";
+  stop.title = "Остановить";
+  stop.onclick = (ev) => { ev.stopPropagation(); stopInlineCard(li, cam); };
+  const mute = document.createElement("button");
+  mute.textContent = "🔇";
+  mute.title = "Звук";
+  mute.onclick = (ev) => {
+    ev.stopPropagation();
+    if (!video.video) return;
+    video.video.muted = !video.video.muted;
+    mute.textContent = video.video.muted ? "🔇" : "🔊";
+  };
+  const full = document.createElement("button");
+  full.textContent = "⛶";
+  full.title = "Во весь экран";
+  full.onclick = (ev) => {
+    ev.stopPropagation();
+    li.requestFullscreen?.() ?? li.webkitRequestFullscreen?.();
+  };
+  bar.append(stop, mute, full);
+  return bar;
+}
+
+// Запускает видео прямо внутри карточки, заменяя снимок <video-stream>,
+// muted по умолчанию; другие карточки не затрагиваются.
+function playInlineCard(li, cam) {
+  if (li.querySelector("video-stream")) return; // уже играет — повторный клик по видео не перезапускает
+  const img = li.querySelector("img");
+  const video = document.createElement("video-stream");
+  video.className = "card-video";
+  video.mode = info.player_mode;
+  video.src = streamUrl(cam.id);
+  img.replaceWith(video);
+  li.appendChild(inlineCardBar(li, cam, video));
+  muteWhenReady(video);
+}
+
 function renderList() {
   stopPlayers();
   const list = $("#cams");
   list.replaceChildren(...info.cameras.map((cam) => {
     const li = document.createElement("li");
     li.className = "cam";
+    li.dataset.camId = cam.id;
     if (cam.online === false) li.classList.add("offline");
-    const img = document.createElement("img");
-    img.alt = cam.name;
-    img.src = snapshotUrl(cam.id);
-    img.onerror = () => { img.removeAttribute("src"); };
+    const img = cardSnapshotImg(cam);
     const caption = document.createElement("div");
+    caption.className = "caption";
     caption.innerHTML = `<b></b><span class="status"></span>`;
     caption.querySelector("b").textContent = cam.name;
     caption.querySelector(".status").textContent = statusText(cam.online);
     li.append(img, caption);
-    li.onclick = () => (archiveMode ? openArchive(cam) : openCameras([cam]));
+    li.onclick = () => {
+      if (archiveMode) { openArchive(cam); return; }
+      playInlineCard(li, cam);
+    };
     return li;
   }));
   $("#message").hidden = true;
@@ -134,6 +204,26 @@ function renderList() {
   $("#title").textContent = archiveMode ? "Архив" : "Камеры";
   $("#mode-archive").hidden = !info.recording;
   if (archiveMode) $("#grid").hidden = true;
+}
+
+function anyCardPlaying() {
+  return Boolean($("#cams").querySelector("video-stream"));
+}
+
+// Периодическое обновление без перерисовки: только статус/офлайн-класс и
+// снимок неиграющих карточек — перерисовка убила бы активные inline-плееры.
+function updateCardStatuses() {
+  for (const li of $("#cams").children) {
+    const cam = info.cameras.find((c) => c.id === li.dataset.camId);
+    if (!cam) continue;
+    li.classList.toggle("offline", cam.online === false);
+    const status = li.querySelector(".status");
+    if (status) status.textContent = statusText(cam.online);
+    if (!li.querySelector("video-stream")) {
+      const img = li.querySelector("img");
+      if (img) img.src = snapshotUrl(cam.id);
+    }
+  }
 }
 
 function player(cam) {
@@ -151,12 +241,23 @@ function player(cam) {
   retry.title = "Повторить";
   // VideoRTC игнорирует новый src, пока открыт старый WebSocket — сначала рвём соединение
   retry.onclick = () => { video.ondisconnect(); video.src = streamUrl(cam.id); };
+  const mute = document.createElement("button");
+  mute.textContent = "🔇";
+  mute.title = "Звук";
+  mute.onclick = () => {
+    if (!video.video) return;
+    video.video.muted = !video.video.muted;
+    mute.textContent = video.video.muted ? "🔇" : "🔊";
+  };
   const full = document.createElement("button");
   full.textContent = "⛶";
   full.title = "Во весь экран";
   full.onclick = () => (box.requestFullscreen?.() ?? box.webkitRequestFullscreen?.());
-  bar.append(name, retry, full);
+  bar.append(name, mute, retry, full);
   box.append(video, bar);
+  // VideoRTC's video is muted by default, but set it explicitly since we
+  // can't verify that from here (video-rtc.js is served by go2rtc, not us).
+  muteWhenReady(video);
   return box;
 }
 
@@ -203,7 +304,11 @@ async function main() {
     if (!token) return;
     try {
       const ok = await refresh();
-      if (ok && !$("#cams").hidden) renderList();
+      if (!ok || $("#cams").hidden) return;
+      // Не перерисовываем список, пока в нём есть играющие карточки — иначе
+      // мы бы их остановили; вместо этого просто обновляем статус/снимки.
+      if (anyCardPlaying()) updateCardStatuses();
+      else renderList();
     } catch {
       // Ignore network errors during periodic refresh
     }

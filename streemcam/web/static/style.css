@@ -14,11 +14,21 @@ button { background: var(--accent); color: var(--accent-fg); border: 0; border-r
 main { padding: 0 16px 16px; }
 #message { color: var(--muted); text-align: center; margin-top: 40px; }
 #cams { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
-.cam { background: var(--card); border-radius: 12px; overflow: hidden; cursor: pointer; }
+.cam { background: var(--card); border-radius: 12px; overflow: hidden; cursor: pointer; position: relative; }
 .cam img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
 .cam div { display: flex; justify-content: space-between; padding: 8px 12px; }
 .cam .status { color: var(--muted); }
 .cam.offline img { opacity: .4; }
+.cam .card-video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+.cam .card-video video { width: 100%; height: 100%; object-fit: cover; }
+.cam .card-bar {
+  position: absolute; top: 0; right: 0; display: flex; gap: 4px; align-items: center;
+  padding: 4px 6px; background: rgba(0, 0, 0, .55); border-radius: 0 0 0 10px;
+}
+.cam .card-bar button { padding: 2px 8px; font-size: 13px; border-radius: 6px; }
+.cam:fullscreen { display: flex; align-items: center; background: #000; }
+.cam:fullscreen .card-video { height: 100%; aspect-ratio: auto; }
+.cam:fullscreen .caption { display: none; }
 #viewer.single .player { max-width: 1280px; margin: 0 auto; }
 #viewer.grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .player { background: #000; border-radius: 12px; overflow: hidden; }
