@@ -30,13 +30,37 @@ services:
       - ./data:/app/data
     # 8081 (внутренний API для go2rtc) доступен только в docker-сети — не публикуйте его
     ports:
-      - "127.0.0.1:8080:8080"   # локальная проверка; наружу — только через cloudflared
+      - "127.0.0.1:8080:8080"   # локальная проверка; наружу — через cloudflared или caddy
     restart: unless-stopped
 
+  # Публикация наружу — один из профилей (COMPOSE_PROFILES в .env):
+  #   cloudflared — Cloudflare Tunnel (домашний сервер без белого IP, DNS домена в Cloudflare)
+  #   caddy       — HTTPS прямо на сервере с белым IP (VPS), сертификат Let's Encrypt
   cloudflared:
     image: cloudflare/cloudflared:latest
+    profiles: ["cloudflared"]
     command: tunnel --no-autoupdate run
     environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     depends_on: [streemcam]
     restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    profiles: ["caddy"]
+    environment:
+      STREEMCAM_DOMAIN: ${STREEMCAM_DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [streemcam]
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

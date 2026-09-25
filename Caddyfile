@@ -1,0 +1,6 @@
+# HTTPS для streemcam прямо на VPS (профиль compose "caddy").
+# Сертификат Let's Encrypt выпускается автоматически; A-запись домена должна указывать на сервер.
+{$STREEMCAM_DOMAIN} {
+	encode gzip
+	reverse_proxy streemcam:8080
+}

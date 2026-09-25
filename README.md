@@ -7,8 +7,12 @@
 1. `copy config.example.yaml config.yaml`, `copy .env.example .env`, заполнить.
    Секрет: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
    Сгенерировать и вписать ещё STREEMCAM_INTERNAL_KEY (той же командой).
-2. Cloudflare Zero Trust → Networks → Tunnels → Create tunnel → скопировать токен в
-   `CLOUDFLARE_TUNNEL_TOKEN`. Public hostname: `cams.example.com` → `http://streemcam:8080`.
+2. Публикация наружу — выбрать одно (`COMPOSE_PROFILES` в `.env`):
+   - **VPS с белым IP** — `COMPOSE_PROFILES=caddy`, `STREEMCAM_DOMAIN=cams.example.com`;
+     A-запись домена → IP сервера, порты 80/443 открыты. Caddy сам получит сертификат Let's Encrypt.
+   - **Домашний сервер без белого IP** — `COMPOSE_PROFILES=cloudflared` (DNS домена должен быть в Cloudflare):
+     Cloudflare Zero Trust → Networks → Tunnels → Create tunnel → токен в `CLOUDFLARE_TUNNEL_TOKEN`,
+     Public hostname: `cams.example.com` → `http://streemcam:8080`.
 3. `docker compose up -d --build`
 
 ## Telegram
