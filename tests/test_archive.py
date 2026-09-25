@@ -81,3 +81,58 @@ def test_cleanup_by_free_space_skips_recording(cfg, tmp_path):
     arch.cleanup(date(2026, 9, 25), retention_days=14, min_free_gb=15, disk_free=disk_free)
     assert not a1.exists() and a2.exists() and live.exists()   # удалён самый старый, дальше места хватило
     assert deleted == [a1]
+
+
+def test_cleanup_tolerates_delete_failures(cfg, tmp_path, monkeypatch):
+    import pathlib
+
+    # Use files old enough to be deleted by retention (older than 14 days from 2026-09-25)
+    a1 = touch(tmp_path, "yard", "2026-09-10", "08-00-00", size=1000)
+    a2 = touch(tmp_path, "yard", "2026-09-10", "09-00-00", size=1000)
+
+    arch = make(cfg, tmp_path)
+
+    # Track unlink calls and make one file's unlink fail
+    original_unlink = pathlib.Path.unlink
+
+    def patched_unlink(self, *args, **kwargs):
+        if self.resolve() == a1.resolve():
+            raise PermissionError("access denied")
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "unlink", patched_unlink)
+
+    result = arch.cleanup(date(2026, 9, 25), retention_days=14, min_free_gb=0,
+                          disk_free=lambda p: 10**12)
+
+    # a1 failed to delete, so it's not in the result list
+    assert a1.exists()  # Still exists because delete failed
+    # a2 was deleted successfully
+    assert not a2.exists()
+    # Only a2 should be in the deleted result (not a1, since its delete failed)
+    assert a2.resolve() in [p.resolve() for p in result]
+    assert a1.resolve() not in [p.resolve() for p in result]
+
+
+def test_hours_tolerates_concurrent_removal(cfg, tmp_path, monkeypatch):
+    import pathlib
+
+    f1 = touch(tmp_path, "yard", "2026-09-25", "08-00-00", size=70)
+    f2 = touch(tmp_path, "yard", "2026-09-25", "10-25-13", size=50)
+    a = make(cfg, tmp_path)
+
+    # Make stat fail for f1 only (simulating concurrent deletion)
+    original_stat = pathlib.Path.stat
+
+    def patched_stat(self, *args, **kwargs):
+        if self.resolve() == f1.resolve():
+            raise FileNotFoundError("file was deleted")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "stat", patched_stat)
+
+    entries = a.hours("yard", "2026-09-25")
+    # Should return only f2, skipping f1 which failed to stat
+    assert entries == [
+        HourEntry("10-25-13", 10, 50, False),
+    ]

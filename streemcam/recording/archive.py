@@ -57,7 +57,11 @@ class Archive:
         for f in sorted(day_dir.glob("*.mp4")):
             if not NAME_RE.match(f.stem):
                 continue
-            st = f.stat()
+            try:
+                st = f.stat()
+            except OSError:
+                # File was deleted between glob and stat (concurrent cleanup)
+                continue
             entries.append(HourEntry(f.stem, int(f.stem[:2]), st.st_size,
                                      now - st.st_mtime < RECORDING_WINDOW_SECONDS))
         return entries
@@ -84,18 +88,19 @@ class Archive:
                     files.extend(f for f in day_dir.glob("*.mp4") if NAME_RE.match(f.stem))
         return files
 
-    def _delete(self, f: Path) -> None:
+    def _delete(self, f: Path) -> bool:
         try:
             f.unlink()
         except OSError as e:
             log.warning("cannot delete %s: %s", f, e)
-            return
+            return False
         if self._on_delete is not None:
             self._on_delete(f)
         try:
             f.parent.rmdir()  # удалится, только если папка дня опустела
         except OSError:
             pass
+        return True
 
     def cleanup(self, today: date, retention_days: int, min_free_gb: float, disk_free=None) -> list[Path]:
         disk_free = disk_free or (lambda p: shutil.disk_usage(p).free)
@@ -111,8 +116,8 @@ class Archive:
 
         for f in self._all_files():
             if f.parent.name < cutoff and not recording(f):
-                self._delete(f)
-                deleted.append(f)
+                if self._delete(f):
+                    deleted.append(f)
 
         if self.root.is_dir():
             candidates = sorted((f for f in self._all_files() if not recording(f)),
@@ -120,8 +125,8 @@ class Archive:
             for f in candidates:
                 if disk_free(self.root) >= min_free_gb * 10**9:
                     break
-                self._delete(f)
-                deleted.append(f)
+                if self._delete(f):
+                    deleted.append(f)
         if deleted:
             log.info("archive cleanup removed %d files", len(deleted))
         return deleted
