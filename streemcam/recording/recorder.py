@@ -4,7 +4,7 @@ import os
 import shutil
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..catalog import Catalog
@@ -14,8 +14,9 @@ from .schedule import is_recording_time, local_now
 
 log = logging.getLogger(__name__)
 
-TICK_SECONDS = 30
+TICK_SECONDS = 5
 HEALTHY_AFTER_SECONDS = 60
+STALL_SECONDS = 180
 STOP_WAIT_SECONDS = 10.0
 
 
@@ -26,7 +27,7 @@ def backoff(failures: int) -> float:
 def ffmpeg_args(input_url: str, out_dir: Path, ffmpeg: str = "ffmpeg") -> list[str]:
     return [
         ffmpeg, "-hide_banner", "-loglevel", "warning", "-y",  # без -nostdin: stdin нужен для мягкой остановки "q"
-        "-rtsp_transport", "tcp", "-i", input_url,
+        "-rtsp_transport", "tcp", "-timeout", "10000000", "-i", input_url,
         "-map", "0:v:0", "-map", "0:a:0?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-g", "50",
         "-c:a", "aac", "-b:a", "64k",
@@ -66,12 +67,14 @@ class _State:
 
 class Recorder:
     def __init__(self, cfg: Config, catalog: Catalog, spawn=None, now=None,
-                 clock=time.monotonic, on_alert=None, ffmpeg: str = "ffmpeg"):
+                 clock=time.monotonic, on_alert=None, ffmpeg: str = "ffmpeg",
+                 wall_clock=time.time):
         self.cfg = cfg
         self.catalog = catalog
         self._spawn = spawn or asyncio.create_subprocess_exec
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._clock = clock
+        self._wall_clock = wall_clock
         self._on_alert = on_alert
         self._ffmpeg = ffmpeg
         self._root = Path(cfg.recording.path)
@@ -89,7 +92,10 @@ class Recorder:
             await asyncio.Event().wait()
         try:
             while True:
-                await self.tick()
+                try:
+                    await self.tick()
+                except Exception:
+                    log.exception("recorder tick failed")
                 await asyncio.sleep(TICK_SECONDS)
         finally:
             await self.stop_all()
@@ -100,11 +106,13 @@ class Recorder:
         wanted = {t.cam_id: t for t in targets(self.cfg, self.catalog)} \
             if is_recording_time(wall, self.cfg.recording) else {}
 
-        for cam_id, st in list(self._states.items()):
-            if cam_id not in wanted:
-                await self._stop(st)
+        to_remove = [cam_id for cam_id in self._states if cam_id not in wanted]
+        if to_remove:
+            await asyncio.gather(*(self._stop(self._states[cam_id]) for cam_id in to_remove))
+            for cam_id in to_remove:
                 del self._states[cam_id]
-                continue
+
+        for cam_id, st in list(self._states.items()):
             if st.proc is not None and st.proc.returncode is not None:
                 log.warning("recorder for %s exited with %s", cam_id, st.proc.returncode)
                 st.proc = None
@@ -117,27 +125,53 @@ class Recorder:
             st = self._states.get(cam_id)
             if st is None:
                 st = self._states[cam_id] = _State(target, down_since=mono)
-            if st.proc is None and mono >= st.next_start:
-                await self._start(st, wall, mono)
-            await self._check_health(st, mono)
+            try:
+                if st.proc is None and mono >= st.next_start:
+                    await self._start(st, wall, mono)
+                await self._check_health(st, mono, wall)
+            except Exception:
+                log.exception("error handling camera %s", cam_id)
+                st.failures += 1
+                st.next_start = mono + backoff(st.failures)
+                if st.down_since is None:
+                    st.down_since = mono
 
     async def _start(self, st: _State, wall: datetime, mono: float) -> None:
         out_dir = self._root / st.target.cam_id
         local = local_now(wall, self.cfg.recording)
-        for day in (local, local + timedelta(days=1)):
-            (out_dir / day.strftime("%Y-%m-%d")).mkdir(parents=True, exist_ok=True)
+        (out_dir / local.strftime("%Y-%m-%d")).mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "TZ": self.cfg.recording.timezone}
-        try:
-            st.proc = await self._spawn(*ffmpeg_args(st.target.input_url, out_dir, self._ffmpeg),
-                                        stdin=asyncio.subprocess.PIPE,
-                                        stdout=asyncio.subprocess.DEVNULL, env=env)
-            st.started_at = mono
-        except OSError as e:
-            log.error("cannot start ffmpeg for %s: %s", st.target.cam_id, e)
-            st.failures += 1
-            st.next_start = mono + backoff(st.failures)
+        st.proc = await self._spawn(*ffmpeg_args(st.target.input_url, out_dir, self._ffmpeg),
+                                    stdin=asyncio.subprocess.PIPE,
+                                    stdout=asyncio.subprocess.DEVNULL, env=env)
+        st.started_at = mono
 
-    async def _check_health(self, st: _State, mono: float) -> None:
+    def _is_stalled(self, st: _State, mono: float, wall: datetime) -> bool:
+        if st.proc is None or st.proc.returncode is not None:
+            return False
+        if mono - st.started_at < STALL_SECONDS:
+            return False
+        local = local_now(wall, self.cfg.recording)
+        today_dir = self._root / st.target.cam_id / local.strftime("%Y-%m-%d")
+        newest_mtime = None
+        if today_dir.is_dir():
+            for f in today_dir.glob("*.mp4"):
+                try:
+                    mt = f.stat().st_mtime
+                except OSError:
+                    continue
+                if newest_mtime is None or mt > newest_mtime:
+                    newest_mtime = mt
+        if newest_mtime is None:
+            return True
+        return (self._wall_clock() - newest_mtime) >= STALL_SECONDS
+
+    async def _check_health(self, st: _State, mono: float, wall: datetime) -> None:
+        if self._is_stalled(st, mono, wall):
+            log.warning("recorder for %s stalled (no fresh output for %ss), restarting",
+                        st.target.cam_id, STALL_SECONDS)
+            st.proc.terminate()
+            return
         running = st.proc is not None and st.proc.returncode is None
         if running and mono - st.started_at >= HEALTHY_AFTER_SECONDS:
             st.failures = 0
@@ -174,8 +208,7 @@ class Recorder:
             await p.wait()
 
     async def stop_all(self) -> None:
-        for st in list(self._states.values()):
-            await self._stop(st)
+        await asyncio.gather(*(self._stop(st) for st in list(self._states.values())))
         self._states.clear()
 
     async def _alert(self, text: str) -> None:

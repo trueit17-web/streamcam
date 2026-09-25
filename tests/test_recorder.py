@@ -1,6 +1,6 @@
 import asyncio
-from datetime import date, datetime, timezone
-from pathlib import Path
+import os
+from datetime import datetime, timezone
 
 import pytest
 
@@ -51,6 +51,7 @@ class Env:
         self.alerts = []
         self.wall = datetime(2026, 9, 25, 5, 0, tzinfo=timezone.utc)  # 08:00 MSK
         self.mono = 1000.0
+        self.wallclock = 2_000_000.0
 
         async def spawn(*args, **kwargs):
             self.calls.append((args, kwargs))
@@ -62,7 +63,8 @@ class Env:
             self.alerts.append(text)
 
         self.rec = Recorder(cfg, catalog, spawn=spawn, now=lambda: self.wall,
-                            clock=lambda: self.mono, on_alert=on_alert)
+                            clock=lambda: self.mono, on_alert=on_alert,
+                            wall_clock=lambda: self.wallclock)
 
 
 @pytest.fixture
@@ -78,8 +80,10 @@ def test_ffmpeg_args(tmp_path):
     args = ffmpeg_args("rtsp://go2rtc:8554/room~rec", tmp_path / "room")
     assert args[0] == "ffmpeg"
     assert args[args.index("-i") + 1] == "rtsp://go2rtc:8554/room~rec"
+    assert args[args.index("-i") - 2:args.index("-i")] == ["-timeout", "10000000"]
     joined = " ".join(args)
-    for part in ["-rtsp_transport tcp", "-c:v libx264", "-preset veryfast", "-crf 28", "-g 50",
+    for part in ["-rtsp_transport tcp", "-timeout 10000000", "-c:v libx264", "-preset veryfast",
+                 "-crf 28", "-g 50",
                  "-c:a aac", "-b:a 64k", "-f segment", "-segment_time 3600", "-segment_atclocktime 1",
                  "-reset_timestamps 1", "-strftime 1", "-segment_format mp4",
                  "-segment_format_options movflags=+frag_keyframe+empty_moov+default_base_moof",
@@ -106,7 +110,7 @@ async def test_starts_in_window_creates_dirs_and_stops_outside(rcfg, tmp_path):
     assert kwargs["env"]["TZ"] == "Europe/Moscow"
     assert kwargs["stdin"] == asyncio.subprocess.PIPE
     assert (tmp_path / "yard" / "2026-09-25").is_dir()
-    assert (tmp_path / "yard" / "2026-09-26").is_dir()
+    assert not (tmp_path / "yard" / "2026-09-26").exists()
     assert env.rec.active_cams() == {"yard", "gate", "room"}
 
     await env.rec.tick()
@@ -166,3 +170,51 @@ async def test_stop_escalates_to_terminate(rcfg, monkeypatch):
 
 def test_available(rcfg):
     assert Recorder(rcfg, Catalog(rcfg), ffmpeg="definitely-not-ffmpeg-xyz").available() is False
+
+
+async def test_stall_watchdog_terminates_when_no_fresh_output(rcfg, tmp_path):
+    env = Env(rcfg, Catalog(rcfg))
+    await env.rec.tick()
+    assert len(env.procs) == 3
+    # ни один файл не записан, монотонные часы уходят за STALL_SECONDS (180)
+    env.mono += 181
+    await env.rec.tick()
+    assert env.procs[0].terminated is True
+
+
+async def test_stall_watchdog_skips_when_fresh_file_exists(rcfg, tmp_path):
+    env = Env(rcfg, Catalog(rcfg))
+    await env.rec.tick()
+    day_dir = tmp_path / "yard" / "2026-09-25"
+    fresh_file = day_dir / "08-00-00.mp4"
+    fresh_file.write_bytes(b"data")
+    os.utime(fresh_file, (env.wallclock, env.wallclock))  # свежий файл "сейчас"
+    env.mono += 181                     # процесс работает дольше STALL_SECONDS
+    await env.rec.tick()
+    assert env.procs[0].terminated is False
+
+
+async def test_camera_error_does_not_stop_others(make_cfg, tmp_path):
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path)},
+                   cameras=[{"id": "yard", "name": "Двор", "type": "rtsp", "url": "rtsp://x"},
+                            {"id": "gate2", "name": "Ворота2", "type": "rtsp", "url": "rtsp://y"}])
+    catalog = Catalog(cfg)
+    ok_procs = []
+    wall = datetime(2026, 9, 25, 5, 0, tzinfo=timezone.utc)  # 08:00 MSK
+    mono = {"v": 1000.0}
+
+    async def spawn(*args, **kwargs):
+        if any("gate2" in a for a in args if isinstance(a, str)):
+            raise ValueError("boom")
+        p = FakeProc()
+        ok_procs.append(p)
+        return p
+
+    rec = Recorder(cfg, catalog, spawn=spawn, now=lambda: wall, clock=lambda: mono["v"])
+    await rec.tick()
+    assert rec.active_cams() == {"yard"}
+    assert len(ok_procs) == 1
+    st = rec._states["gate2"]
+    assert st.proc is None
+    assert st.failures == 1
+    assert st.next_start == mono["v"] + backoff(1)
