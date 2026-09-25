@@ -6,3 +6,4 @@ config.yaml
 .env
 data/
 go2rtc/
+recordings/

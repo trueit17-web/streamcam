@@ -5,3 +5,4 @@ go2rtc
 tests
 config.yaml
 .env
+recordings

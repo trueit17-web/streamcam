@@ -28,10 +28,12 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
+      - ./recordings:/recordings
     # 8081 (внутренний API для go2rtc) доступен только в docker-сети — не публикуйте его
     ports:
       - "127.0.0.1:8080:8080"   # локальная проверка; наружу — через cloudflared или caddy
     restart: unless-stopped
+    stop_grace_period: 30s
 
   # Публикация наружу — один из профилей (COMPOSE_PROFILES в .env):
   #   cloudflared — Cloudflare Tunnel (домашний сервер без белого IP, DNS домена в Cloudflare)

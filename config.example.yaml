@@ -68,3 +68,16 @@ cameras:
     name: Тестовый поток
     type: rtsp
     url: "ffmpeg:virtual?video&size=720#video=h264"
+    record: false
+
+recording:
+  enabled: true
+  timezone: Europe/Moscow
+  start: "08:00"             # включительно
+  end: "19:00"               # не включительно; файлы режутся по часам
+  retention_days: 14
+  min_free_gb: 15            # при нехватке места удаляются самые старые часы
+  path: /recordings
+  rtsp_url: rtsp://go2rtc:8554
+  tuya: true                 # писать камеры Tuya (поток из облака — расходует трафик)
+  alert_minutes: 10
