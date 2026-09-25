@@ -211,7 +211,6 @@ async function main() {
 }
 
 let archiveMode = false;
-let archiveCam = null;
 
 function archiveUrl(path) {
   return `/api/archive/${path}`;
@@ -219,7 +218,7 @@ function archiveUrl(path) {
 
 function fileUrl(cam, day, name, download) {
   const q = `s=${encodeURIComponent(token)}${download ? "&download=1" : ""}`;
-  return archiveUrl(`${encodeURIComponent(cam)}/${day}/${name}.mp4?${q}`);
+  return archiveUrl(`${encodeURIComponent(cam)}/${encodeURIComponent(day)}/${encodeURIComponent(name)}.mp4?${q}`);
 }
 
 function hideArchive() {
@@ -246,9 +245,34 @@ function chip(text, onClick, active) {
   return b;
 }
 
+function archiveEmpty(text) {
+  $("#archive-empty").textContent = text;
+  $("#archive-empty").hidden = false;
+}
+
+async function loadArchiveJson(path, key) {
+  try {
+    const r = await api(archiveUrl(path));
+    if (r.status === 401 || r.status === 403) {
+      token = null;
+      store("sc_token", "");
+      hideArchive();
+      showMessage(r.status === 403 ? "Доступ отозван." : "Сессия истекла. Запросите новую ссылку командой /cams.");
+      return null;
+    }
+    if (!r.ok) {
+      archiveEmpty("Не удалось загрузить архив.");
+      return null;
+    }
+    return (await r.json())[key];
+  } catch {
+    archiveEmpty("Не удалось загрузить архив. Проверьте соединение.");
+    return null;
+  }
+}
+
 async function openArchive(cam) {
   stopPlayers();
-  archiveCam = cam;
   $("#cams").hidden = true;
   $("#grid").hidden = true;
   $("#back").hidden = false;
@@ -256,8 +280,9 @@ async function openArchive(cam) {
   $("#archive").hidden = false;
   $("#archive-player").hidden = true;
   $("#archive-hours").replaceChildren();
-  const r = await api(archiveUrl(`${encodeURIComponent(cam.id)}/days`));
-  const days = r.ok ? (await r.json()).days : [];
+  $("#archive-empty").hidden = true;
+  const days = await loadArchiveJson(`${encodeURIComponent(cam.id)}/days`, "days");
+  if (days === null) return;
   $("#archive-empty").hidden = days.length > 0;
   $("#archive-empty").textContent = "Записей пока нет.";
   $("#archive-days").replaceChildren(...days.map((d) => chip(d, () => openDay(cam, d))));
@@ -266,8 +291,8 @@ async function openArchive(cam) {
 
 async function openDay(cam, day) {
   for (const b of $("#archive-days").children) b.classList.toggle("active", b.textContent === day);
-  const r = await api(archiveUrl(`${encodeURIComponent(cam.id)}/${day}`));
-  const hours = r.ok ? (await r.json()).hours : [];
+  const hours = await loadArchiveJson(`${encodeURIComponent(cam.id)}/${encodeURIComponent(day)}`, "hours");
+  if (hours === null) return;
   $("#archive-hours").replaceChildren(...hours.map((h) => {
     const label = `${h.name.slice(0, 2)}:${h.name.slice(3, 5)}${h.recording ? " •" : ""} · ${(h.size / 1e6).toFixed(0)} МБ`;
     return chip(label, (ev) => playHour(cam, day, h, ev.currentTarget));
