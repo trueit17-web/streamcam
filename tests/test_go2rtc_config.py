@@ -1,14 +1,31 @@
 import yaml
 
 from streemcam.catalog import CameraInfo
-from streemcam.go2rtc_config import (COMPAT_SUFFIX, REC_SUFFIX, compat_name, compat_src, rec_stream_name,
-                                     render, stream_url, write_go2rtc_config)
+from streemcam.go2rtc_config import (COMPAT_SUFFIX, REC_SUFFIX, TUYA_AUDIO_FILTER, compat_name, compat_src,
+                                     rec_stream_name, render, stream_url, tuya_compat_src, tuya_http_input,
+                                     tuya_live_src, write_go2rtc_config)
 
 
 def test_compat_helpers():
     assert COMPAT_SUFFIX == "~h264"
     assert compat_name("room") == "room~h264"
     assert compat_src("room") == "ffmpeg:room#video=h264#width=1280#audio=aac"
+
+
+def test_tuya_http_input():
+    assert tuya_http_input("tuya_bf1") == "http://127.0.0.1:1984/api/stream.mp4?src=tuya_bf1&mp4=flac"
+    assert tuya_http_input("tuya_bf1", base="http://go2rtc:1984") == (
+        "http://go2rtc:1984/api/stream.mp4?src=tuya_bf1&mp4=flac"
+    )
+
+
+def test_tuya_srcs_use_http_input():
+    assert tuya_live_src("tuya_bf1") == (
+        f"ffmpeg:{tuya_http_input('tuya_bf1')}#video=copy#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+    )
+    assert tuya_compat_src("tuya_bf1") == (
+        f"ffmpeg:{tuya_http_input('tuya_bf1')}#video=h264#width=1280#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+    )
 
 
 def test_stream_urls(cfg):

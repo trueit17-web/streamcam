@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 import pytest
 
 from streemcam.catalog import Catalog
-from streemcam.go2rtc_config import TUYA_AUDIO_FILTER
-from streemcam.recording.recorder import Recorder, RecTarget, backoff, ffmpeg_args, targets
+from streemcam.go2rtc_config import TUYA_AUDIO_FILTER, tuya_http_input
+from streemcam.recording.recorder import STALL_SECONDS, Recorder, RecTarget, backoff, ffmpeg_args, targets
 from streemcam.tuya.models import TuyaCamera
 
 
@@ -70,7 +70,8 @@ class Env:
 
 @pytest.fixture
 def rcfg(make_cfg, tmp_path):
-    return make_cfg(recording={"enabled": True, "path": str(tmp_path), "rtsp_url": "rtsp://go2rtc:8554"})
+    return make_cfg(go2rtc_url="http://go2rtc:1984",
+                    recording={"enabled": True, "path": str(tmp_path), "rtsp_url": "rtsp://go2rtc:8554"})
 
 
 def test_backoff():
@@ -93,12 +94,31 @@ def test_ffmpeg_args(tmp_path):
         assert part in joined
     assert args[-1] == str(tmp_path / "room" / "%Y-%m-%d" / "%H-%M-%S.mp4")
     assert "-af" not in args
+    assert "-rw_timeout" not in args
 
 
 def test_ffmpeg_args_with_audio_filter(tmp_path):
     args = ffmpeg_args("rtsp://go2rtc:8554/tuya_bf1", tmp_path / "tuya_bf1", audio_filter=TUYA_AUDIO_FILTER)
     assert args[args.index("-af") + 1] == TUYA_AUDIO_FILTER
     assert args[args.index("-af") + 2] == "-c:a"
+    assert args[args.index("-rtsp_transport") + 1] == "tcp"
+
+
+def test_ffmpeg_args_http_input_uses_rw_timeout(tmp_path):
+    url = "http://go2rtc:1984/api/stream.mp4?src=tuya_bf1&mp4=flac"
+    args = ffmpeg_args(url, tmp_path / "tuya_bf1", audio_filter=TUYA_AUDIO_FILTER)
+    assert args[args.index("-i") + 1] == url
+    assert args[args.index("-i") - 2:args.index("-i")] == ["-rw_timeout", "10000000"]
+    assert "-rtsp_transport" not in args
+    assert "-timeout" not in args
+
+
+def test_ffmpeg_args_https_input_uses_rw_timeout(tmp_path):
+    url = "https://go2rtc:1984/api/stream.mp4?src=tuya_bf1&mp4=flac"
+    args = ffmpeg_args(url, tmp_path / "tuya_bf1")
+    assert args[args.index("-i") - 2:args.index("-i")] == ["-rw_timeout", "10000000"]
+    assert "-rtsp_transport" not in args
+    assert "-timeout" not in args
 
 
 def test_targets(rcfg):
@@ -111,7 +131,7 @@ def test_targets(rcfg):
     assert ts["gate"].audio_filter is None
     assert ts["room"].input_url == "rtsp://go2rtc:8554/room~rec"
     assert ts["room"].audio_filter is None
-    assert ts["tuya_bf1"].input_url == "rtsp://go2rtc:8554/tuya_bf1"
+    assert ts["tuya_bf1"].input_url == tuya_http_input("tuya_bf1", "http://go2rtc:1984")
     assert ts["tuya_bf1"].audio_filter == TUYA_AUDIO_FILTER
 
 
@@ -205,8 +225,8 @@ async def test_stall_watchdog_terminates_on_stale_file(rcfg, tmp_path):
     day_dir = tmp_path / "yard" / "2026-09-25"
     stale_file = day_dir / "08-00-00.mp4"
     stale_file.write_bytes(b"data")
-    os.utime(stale_file, (env.wallclock - 200, env.wallclock - 200))  # старше STALL_SECONDS (180)
-    env.mono += 181
+    os.utime(stale_file, (env.wallclock - (STALL_SECONDS + 20), env.wallclock - (STALL_SECONDS + 20)))
+    env.mono += STALL_SECONDS + 1
     await env.rec.tick()
     assert env.procs[0].terminated is True
 
@@ -230,8 +250,8 @@ async def test_stall_watchdog_terminates_when_no_fresh_output(rcfg, tmp_path):
     env = Env(rcfg, Catalog(rcfg))
     await env.rec.tick()
     assert len(env.procs) == 3
-    # ни один файл не записан, монотонные часы уходят за STALL_SECONDS (180)
-    env.mono += 181
+    # ни один файл не записан, монотонные часы уходят за STALL_SECONDS
+    env.mono += STALL_SECONDS + 1
     await env.rec.tick()
     assert env.procs[0].terminated is True
 
@@ -243,7 +263,7 @@ async def test_stall_watchdog_skips_when_fresh_file_exists(rcfg, tmp_path):
     fresh_file = day_dir / "08-00-00.mp4"
     fresh_file.write_bytes(b"data")
     os.utime(fresh_file, (env.wallclock, env.wallclock))  # свежий файл "сейчас"
-    env.mono += 181                     # процесс работает дольше STALL_SECONDS
+    env.mono += STALL_SECONDS + 1        # процесс работает дольше STALL_SECONDS
     await env.rec.tick()
     assert env.procs[0].terminated is False
 

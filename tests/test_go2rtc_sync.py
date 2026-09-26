@@ -9,6 +9,7 @@ from streemcam.go2rtc_config import (
     compat_name,
     compat_src,
     tuya_compat_src,
+    tuya_http_input,
     tuya_live_src,
 )
 from streemcam.go2rtc_sync import Go2rtcSync, desired_streams, tuya_src
@@ -24,9 +25,11 @@ def test_helpers():
     assert compat_name("room") == "room~h264"
     assert compat_src("room") == "ffmpeg:room#video=h264#width=1280#audio=aac"
     assert tuya_src(URL, "bf1", KEY) == f"echo:curl -fsS {URL}/tuya/bf1?key={KEY}"
-    assert tuya_live_src("tuya_bf1") == f"ffmpeg:tuya_bf1#video=copy#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+    assert tuya_live_src("tuya_bf1") == (
+        f"ffmpeg:{tuya_http_input('tuya_bf1')}#video=copy#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+    )
     assert tuya_compat_src("tuya_bf1") == (
-        f"ffmpeg:tuya_bf1#video=h264#width=1280#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+        f"ffmpeg:{tuya_http_input('tuya_bf1')}#video=h264#width=1280#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
     )
 
 

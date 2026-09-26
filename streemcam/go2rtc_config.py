@@ -21,12 +21,16 @@ def compat_src(cam_id: str) -> str:
     return f"ffmpeg:{cam_id}#video=h264#width=1280#audio=aac"
 
 
+def tuya_http_input(cam_id: str, base: str = "http://127.0.0.1:1984") -> str:
+    return f"{base}/api/stream.mp4?src={cam_id}&mp4=flac"
+
+
 def tuya_live_src(cam_id: str) -> str:
-    return f"ffmpeg:{cam_id}#video=copy#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+    return f"ffmpeg:{tuya_http_input(cam_id)}#video=copy#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
 
 
 def tuya_compat_src(cam_id: str) -> str:
-    return f"ffmpeg:{cam_id}#video=h264#width=1280#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
+    return f"ffmpeg:{tuya_http_input(cam_id)}#video=h264#width=1280#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
 
 
 def rec_stream_name(cfg: Config, cam: CameraInfo) -> str | None:

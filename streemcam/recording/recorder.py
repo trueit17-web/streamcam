@@ -6,17 +6,18 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ..catalog import Catalog
 from ..config import Config
-from ..go2rtc_config import TUYA_AUDIO_FILTER, rec_stream_name
+from ..go2rtc_config import TUYA_AUDIO_FILTER, rec_stream_name, tuya_http_input
 from .schedule import is_recording_time, local_now
 
 log = logging.getLogger(__name__)
 
 TICK_SECONDS = 5
 HEALTHY_AFTER_SECONDS = 60
-STALL_SECONDS = 180
+STALL_SECONDS = 60
 FRESH_SECONDS = 30
 STOP_WAIT_SECONDS = 10.0
 
@@ -27,9 +28,13 @@ def backoff(failures: int) -> float:
 
 def ffmpeg_args(input_url: str, out_dir: Path, ffmpeg: str = "ffmpeg",
                  audio_filter: str | None = None) -> list[str]:
+    if urlsplit(input_url).scheme in ("http", "https"):
+        input_opts = ["-rw_timeout", "10000000"]
+    else:
+        input_opts = ["-rtsp_transport", "tcp", "-timeout", "10000000"]
     args = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",  # без -nostdin: stdin нужен для мягкой остановки "q"
-        "-rtsp_transport", "tcp", "-timeout", "10000000", "-i", input_url,
+        *input_opts, "-i", input_url,
         "-map", "0:v:0", "-map", "0:a:0?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-g", "50",
     ]
@@ -60,8 +65,13 @@ def targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
             continue
         stream = rec_stream_name(cfg, cam)
         if stream is not None:
-            audio_filter = TUYA_AUDIO_FILTER if cam.kind == "tuya" else None
-            result.append(RecTarget(cam.id, cam.name, f"{cfg.recording.rtsp_url}/{stream}", audio_filter))
+            if cam.kind == "tuya":
+                input_url = tuya_http_input(cam.id, cfg.go2rtc_url.rstrip("/"))
+                audio_filter = TUYA_AUDIO_FILTER
+            else:
+                input_url = f"{cfg.recording.rtsp_url}/{stream}"
+                audio_filter = None
+            result.append(RecTarget(cam.id, cam.name, input_url, audio_filter))
     return result
 
 
