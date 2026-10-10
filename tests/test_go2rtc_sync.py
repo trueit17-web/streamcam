@@ -12,7 +12,8 @@ from streemcam.go2rtc_config import (
     tuya_http_input,
     tuya_live_src,
 )
-from streemcam.go2rtc_sync import Go2rtcSync, desired_streams, tuya_src
+from streemcam.go2rtc_sync import Go2rtcSync, desired_streams, imou_src, tuya_src
+from streemcam.imou.models import ImouCamera
 from streemcam.tuya.models import TuyaCamera
 
 KEY = "k" * 20
@@ -163,3 +164,55 @@ async def test_sync_survives_go2rtc_down(cfg):
         raise httpx.ConnectError("down")
     http = httpx.AsyncClient(base_url="http://go2rtc", transport=httpx.MockTransport(handler))
     await Go2rtcSync(http, Catalog(cfg), URL, KEY).sync()  # не бросает
+
+
+def test_desired_streams_imou(cfg):
+    catalog = Catalog(cfg)
+    catalog.set_imou([ImouCamera("AB12CD", "Улица", True)])
+    d = desired_streams(catalog, URL, KEY)
+    assert d["imou_ab12cd"] == f"echo:curl -fsS {URL}/imou/AB12CD?key={KEY}"
+    assert imou_src(URL, "AB12CD", KEY) == d["imou_ab12cd"]
+    assert d["imou_ab12cd~h264"] == compat_src("imou_ab12cd")
+    assert "imou_ab12cd~live" not in d
+    assert len(d) == 2
+
+
+async def test_sync_replaces_imou_keeps_tuya_and_others(cfg):
+    catalog = Catalog(cfg)
+    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    catalog.set_imou([ImouCamera("AB12CD", "Улица", True)])
+    config = {"streams": {
+        "room": "xiaomi://...",
+        "tuya_bf1": tuya_src(URL, "bf1", KEY),
+        "tuya_bf1~live": tuya_live_src("tuya_bf1"),
+        "tuya_bf1~h264": tuya_compat_src("tuya_bf1"),
+        "imou_old": imou_src(URL, "OLD", KEY),
+    }}
+    calls, http = recorder(yaml.safe_dump(config))
+    await Go2rtcSync(http, catalog, URL, KEY).sync()
+    assert [c[0] for c in calls] == ["GET", "POST /api/config", "POST /api/restart"]
+    streams = yaml.safe_load(calls[1][1])["streams"]
+    assert streams["room"] == "xiaomi://..."
+    assert streams["tuya_bf1"] == tuya_src(URL, "bf1", KEY)
+    assert "imou_old" not in streams
+    assert streams["imou_ab12cd"] == imou_src(URL, "AB12CD", KEY)
+    assert streams["imou_ab12cd~h264"] == compat_src("imou_ab12cd")
+
+
+async def test_imou_no_change_skips_writes(cfg):
+    catalog = Catalog(cfg)
+    catalog.set_imou([ImouCamera("AB12CD", "Улица", True)])
+    config = {"streams": {"imou_ab12cd": imou_src(URL, "AB12CD", KEY),
+                          "imou_ab12cd~h264": compat_src("imou_ab12cd")}}
+    calls, http = recorder(yaml.safe_dump(config))
+    await Go2rtcSync(http, catalog, URL, KEY).sync()
+    assert calls == [("GET", None)]
+
+
+async def test_sync_empty_imou_removes_streams(cfg):
+    config = {"streams": {"room": "xiaomi://...", "imou_old": imou_src(URL, "OLD", KEY),
+                          "imou_old~h264": compat_src("imou_old")}}
+    calls, http = recorder(yaml.safe_dump(config))
+    await Go2rtcSync(http, Catalog(cfg), URL, KEY).sync()
+    streams = yaml.safe_load(calls[1][1])["streams"]
+    assert streams == {"room": "xiaomi://..."}
