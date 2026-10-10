@@ -87,6 +87,25 @@ class TuyaConfig(BaseModel):
     snapshot_minutes: int = 15
 
 
+class ImouConfig(BaseModel):
+    enabled: bool = False
+    app_id: str | None = None
+    app_secret: str | None = None
+    api_url: str = "https://openapi.easy4ip.com/openapi"
+    refresh_minutes: int = 10
+    snapshot_minutes: int = 15
+
+    @field_validator("app_id", "app_secret", mode="before")
+    @classmethod
+    def _empty_is_none(cls, v):
+        return v or None
+
+    @field_validator("api_url")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.rstrip("/")
+
+
 class RecordingConfig(BaseModel):
     enabled: bool = False
     timezone: str = "Europe/Moscow"
@@ -159,6 +178,7 @@ class Config(BaseModel):
     internal_url: str = "http://127.0.0.1:8081"
     internal_key: str | None = None
     tuya: TuyaConfig = TuyaConfig()
+    imou: ImouConfig = ImouConfig()
     recording: RecordingConfig = RecordingConfig()
     telegram: TelegramConfig = TelegramConfig()
     discord: DiscordConfig = DiscordConfig()
@@ -193,9 +213,18 @@ class Config(BaseModel):
                 raise ValueError(f"duplicate camera id: {cam.id}")
             if cam.id.startswith("tuya_"):
                 raise ValueError(f"camera id must not start with tuya_: {cam.id}")
+            if cam.id.startswith("imou_"):
+                raise ValueError(f"camera id must not start with imou_: {cam.id}")
             seen.add(cam.id)
         if self.tuya.enabled and not self.internal_key:
             raise ValueError("internal_key is required when tuya.enabled is true")
+        if self.imou.enabled:
+            if not self.imou.app_id:
+                raise ValueError("imou.app_id is required when imou.enabled is true")
+            if not self.imou.app_secret:
+                raise ValueError("imou.app_secret is required when imou.enabled is true")
+            if not self.internal_key:
+                raise ValueError("internal_key is required when imou.enabled is true")
         return self
 
     def camera(self, cam_id: str) -> Camera | None:

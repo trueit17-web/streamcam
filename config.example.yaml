@@ -21,6 +21,14 @@ tuya:
   refresh_minutes: 10
   snapshot_minutes: 15
 
+imou:
+  enabled: false             # камеры из аккаунта Imou Life через облако (только просмотр)
+  app_id: ${IMOU_APP_ID:-}   # ключи с open.imoulife.com (тот же аккаунт, что в Imou Life)
+  app_secret: ${IMOU_APP_SECRET:-}
+  # api_url: https://openapi-fk.easy4ip.com/openapi   # если аккаунт в другом регионе
+  refresh_minutes: 10
+  snapshot_minutes: 15
+
 telegram:
   bot_token: ${TELEGRAM_BOT_TOKEN:-}
   mini_app_short_name: cams   # short name из BotFather /newapp
