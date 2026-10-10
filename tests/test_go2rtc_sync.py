@@ -216,3 +216,32 @@ async def test_sync_empty_imou_removes_streams(cfg):
     await Go2rtcSync(http, Catalog(cfg), URL, KEY).sync()
     streams = yaml.safe_load(calls[1][1])["streams"]
     assert streams == {"room": "xiaomi://..."}
+
+
+async def test_unloaded_provider_streams_are_kept(make_cfg):
+    # оба провайдера включены; Tuya уже обновилась, Imou ещё нет (старт сервиса) —
+    # потоки imou_* из go2rtc.yaml не должны удаляться, иначе go2rtc перезапустится дважды
+    cfg = make_cfg(tuya={"enabled": True}, imou={"enabled": True, "app_id": "a", "app_secret": "s"},
+                   internal_key="k" * 20)
+    catalog = Catalog(cfg)
+    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    config = {"streams": {
+        "tuya_bf1": tuya_src(URL, "bf1", KEY),
+        "tuya_bf1~live": tuya_live_src("tuya_bf1"),
+        "tuya_bf1~h264": tuya_compat_src("tuya_bf1"),
+        "imou_ab12cd": imou_src(URL, "AB12CD", KEY),
+        "imou_ab12cd~h264": compat_src("imou_ab12cd"),
+    }}
+    calls, http = recorder(yaml.safe_dump(config))
+    await Go2rtcSync(http, catalog, URL, KEY).sync()
+    assert calls == [("GET", None)]
+
+
+async def test_disabled_provider_streams_are_removed(make_cfg):
+    cfg = make_cfg(tuya={"enabled": True}, internal_key="k" * 20)  # Imou выключен
+    catalog = Catalog(cfg)
+    catalog.set_tuya([])
+    config = {"streams": {"room": "xiaomi://...", "imou_ab12cd": imou_src(URL, "AB12CD", KEY)}}
+    calls, http = recorder(yaml.safe_dump(config))
+    await Go2rtcSync(http, catalog, URL, KEY).sync()
+    assert yaml.safe_load(calls[1][1])["streams"] == {"room": "xiaomi://..."}

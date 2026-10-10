@@ -82,12 +82,14 @@ class Go2rtcSync:
         streams = config.get("streams") or {}
         if not isinstance(streams, dict):
             streams = {}
+        loaded = {"tuya_": self._catalog.tuya_loaded, "imou_": self._catalog.imou_loaded}
+        managed = tuple(p for p in MANAGED_PREFIXES if loaded[p])
         current_managed = {name: _normalize_src(src) for name, src in streams.items()
-                           if name.startswith(MANAGED_PREFIXES)}
+                           if name.startswith(managed)}
         if current_managed == desired:
             return
 
-        new_streams = {name: src for name, src in streams.items() if not name.startswith(MANAGED_PREFIXES)}
+        new_streams = {name: src for name, src in streams.items() if not name.startswith(managed)}
         new_streams.update(desired)
         new_config = dict(config)
         new_config["streams"] = new_streams

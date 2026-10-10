@@ -37,6 +37,10 @@ class Catalog:
         self._config = [CameraInfo(c.id, c.name, "config") for c in cfg.cameras]
         self._tuya: list[CameraInfo] = []
         self._imou: list[CameraInfo] = []
+        # Провайдер «загружен», когда хотя бы раз опубликовал список (выключенный — сразу).
+        # До этого Go2rtcSync не трогает его потоки: иначе при старте go2rtc перезапускается лишний раз.
+        self.tuya_loaded = not cfg.tuya.enabled
+        self.imou_loaded = not cfg.imou.enabled
 
     def all(self) -> list[CameraInfo]:
         return self._config + self._tuya + self._imou
@@ -56,6 +60,7 @@ class Catalog:
             infos.append(CameraInfo(tuya_cam_id(cam.device_id), cam.name, "tuya",
                                     device_id=cam.device_id, online=cam.online))
         self._tuya = sorted(infos, key=lambda c: c.name)
+        self.tuya_loaded = True
 
     def mark_tuya_offline(self) -> None:
         """Спека §5: при недоступности облака камеры остаются в списке, но помечаются офлайн."""
@@ -74,6 +79,7 @@ class Catalog:
             infos.append(CameraInfo(imou_cam_id(cam.device_id), cam.name, "imou",
                                     device_id=cam.device_id, online=cam.online))
         self._imou = sorted(infos, key=lambda c: c.name)
+        self.imou_loaded = True
 
     def mark_imou_offline(self) -> None:
         self._imou = [CameraInfo(c.id, c.name, c.kind, device_id=c.device_id, online=False)

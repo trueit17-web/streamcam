@@ -53,3 +53,20 @@ def test_mark_imou_offline(cfg):
     c.set_imou([ImouCamera("AB12CD", "Улица", True)])
     c.mark_imou_offline()
     assert c.get("imou_ab12cd").online is False
+
+
+def test_loaded_flags(make_cfg):
+    cfg = make_cfg(tuya={"enabled": True}, imou={"enabled": True, "app_id": "a", "app_secret": "s"},
+                   internal_key="k" * 20)
+    c = Catalog(cfg)
+    assert (c.tuya_loaded, c.imou_loaded) == (False, False)
+    c.set_imou([])
+    c.mark_tuya_offline()
+    assert (c.tuya_loaded, c.imou_loaded) == (False, True)
+    c.set_tuya([])
+    assert c.tuya_loaded is True
+
+
+def test_disabled_providers_count_as_loaded(cfg):
+    c = Catalog(cfg)
+    assert (c.tuya_loaded, c.imou_loaded) == (True, True)
