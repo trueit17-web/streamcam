@@ -1,4 +1,5 @@
-from streemcam.catalog import CameraInfo, Catalog, tuya_cam_id
+from streemcam.catalog import CameraInfo, Catalog, imou_cam_id, tuya_cam_id
+from streemcam.imou.models import ImouCamera
 from streemcam.tuya.models import TuyaCamera
 
 
@@ -28,3 +29,44 @@ def test_set_tuya_replaces_and_skips_unsafe_ids(cfg):
 
 def test_tuya_cam_id():
     assert tuya_cam_id("BfAbC123") == "tuya_bfabc123"
+
+
+def test_set_imou(cfg):
+    c = Catalog(cfg)
+    c.set_tuya([TuyaCamera("bf1", "Я", True)])
+    c.set_imou([ImouCamera("AB12CD", "Улица", True), ImouCamera("bad id", "Х", True)])
+    imou = c.get("imou_ab12cd")
+    assert (imou.kind, imou.device_id, imou.name, imou.online) == ("imou", "AB12CD", "Улица", True)
+    assert imou_cam_id("AB12CD") == "imou_ab12cd"
+    assert [x.kind for x in c.all()][-2:] == ["tuya", "imou"]
+    assert len(c.imou()) == 1
+
+
+def test_imou_sorted_by_name(cfg):
+    c = Catalog(cfg)
+    c.set_imou([ImouCamera("B2", "Улица", True), ImouCamera("A1", "Гараж", True)])
+    assert [x.name for x in c.imou()] == ["Гараж", "Улица"]
+
+
+def test_mark_imou_offline(cfg):
+    c = Catalog(cfg)
+    c.set_imou([ImouCamera("AB12CD", "Улица", True)])
+    c.mark_imou_offline()
+    assert c.get("imou_ab12cd").online is False
+
+
+def test_loaded_flags(make_cfg):
+    cfg = make_cfg(tuya={"enabled": True}, imou={"enabled": True, "app_id": "a", "app_secret": "s"},
+                   internal_key="k" * 20)
+    c = Catalog(cfg)
+    assert (c.tuya_loaded, c.imou_loaded) == (False, False)
+    c.set_imou([])
+    c.mark_tuya_offline()
+    assert (c.tuya_loaded, c.imou_loaded) == (False, True)
+    c.set_tuya([])
+    assert c.tuya_loaded is True
+
+
+def test_disabled_providers_count_as_loaded(cfg):
+    c = Catalog(cfg)
+    assert (c.tuya_loaded, c.imou_loaded) == (True, True)

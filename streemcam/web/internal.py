@@ -5,20 +5,21 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
 from ..catalog import Catalog
+from ..imou.models import ImouError
 from ..tuya.models import TuyaError
 
 log = logging.getLogger(__name__)
 
 
-def create_internal_app(catalog: Catalog, tuya, internal_key: str | None) -> FastAPI:
-    """Внутренний API только для go2rtc (docker-сеть). Выдаёт свежие RTSP-ссылки Tuya."""
+def create_internal_app(catalog: Catalog, tuya, internal_key: str | None, imou=None) -> FastAPI:
+    """Внутренний API только для go2rtc (docker-сеть). Выдаёт свежие ссылки на потоки Tuya и Imou."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/tuya/{device_id}")
     async def tuya_stream(device_id: str, key: str = ""):
         if not internal_key or not hmac.compare_digest(key.encode(), internal_key.encode()):
             return PlainTextResponse("forbidden", status_code=403)
-        if not any(c.device_id == device_id for c in catalog.tuya()):
+        if tuya is None or not any(c.device_id == device_id for c in catalog.tuya()):
             return PlainTextResponse("unknown device", status_code=404)
         if not tuya.logged_in:
             return PlainTextResponse("not logged in to Tuya", status_code=503)
@@ -28,5 +29,18 @@ def create_internal_app(catalog: Catalog, tuya, internal_key: str | None) -> Fas
             log.warning("tuya stream url for %s failed: %s", device_id, e)
             return PlainTextResponse("tuya cloud error", status_code=502)
         return PlainTextResponse(url)
+
+    @app.get("/imou/{device_id}")
+    async def imou_stream(device_id: str, key: str = ""):
+        if not internal_key or not hmac.compare_digest(key.encode(), internal_key.encode()):
+            return PlainTextResponse("forbidden", status_code=403)
+        if imou is None or not any(c.device_id == device_id for c in catalog.imou()):
+            return PlainTextResponse("unknown device", status_code=404)
+        try:
+            url = await imou.stream_url(device_id)
+        except ImouError as e:
+            log.warning("imou stream url for %s failed: %s", device_id, e)
+            return PlainTextResponse("imou cloud error", status_code=502)
+        return PlainTextResponse(f"ffmpeg:{url}#video=copy#audio=aac")
 
     return app

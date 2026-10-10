@@ -24,6 +24,19 @@ def parse_listen(value: str) -> tuple[str, int]:
     return (host or "0.0.0.0"), int(port)
 
 
+def needs_internal_api(cfg: Config) -> bool:
+    return cfg.tuya.enabled or cfg.imou.enabled
+
+
+def build_imou(cfg: Config, catalog: Catalog, sync, on_alert):
+    if not cfg.imou.enabled:
+        return None
+    from .imou.client import ImouClient
+    from .imou.service import ImouService
+    client = ImouClient(cfg.imou.app_id, cfg.imou.app_secret, cfg.imou.api_url, httpx.AsyncClient(timeout=15))
+    return ImouService(cfg, catalog, client, sync=sync, on_alert=on_alert)
+
+
 async def sync_forever(sync, interval_seconds: float) -> None:
     while True:
         await sync.sync()
@@ -109,7 +122,7 @@ async def run(cfg: Config) -> None:
             from .tg.bot import notify_admins
             await notify_admins(tg_bot, cfg, alert_text(catalog, cfg, cam_id, online))
 
-    async def on_tuya_alert(text: str) -> None:
+    async def on_admin_alert(text: str) -> None:
         if tg_bot is not None:
             from .tg.bot import notify_admins
             await notify_admins(tg_bot, cfg, text)
@@ -118,8 +131,9 @@ async def run(cfg: Config) -> None:
     if cfg.tuya.enabled:
         from .tuya.service import TuyaService
         from .tuya.store import TuyaStore
-        tuya = TuyaService(cfg, catalog, TuyaStore(cfg.db_path), sync=sync, on_alert=on_tuya_alert)
+        tuya = TuyaService(cfg, catalog, TuyaStore(cfg.db_path), sync=sync, on_alert=on_admin_alert)
         tuya.load()
+    imou = build_imou(cfg, catalog, sync, on_admin_alert)
 
     archive = recorder = None
     if cfg.recording.enabled:
@@ -128,7 +142,7 @@ async def run(cfg: Config) -> None:
         for warning in recording_config_warnings(cfg):
             log.warning(warning)
         archive = Archive(Path(cfg.recording.path), catalog)
-        recorder = Recorder(cfg, catalog, on_alert=on_tuya_alert)
+        recorder = Recorder(cfg, catalog, on_alert=on_admin_alert)
 
     monitor = CameraMonitor(cfg, catalog, http, on_alert)
     app = create_app(cfg, catalog, access, monitor, access.registry, http, archive=archive)
@@ -136,18 +150,21 @@ async def run(cfg: Config) -> None:
                                            proxy_headers=True, forwarded_allow_ips="*"))
 
     background = [asyncio.create_task(supervise("monitor", monitor.run))]
-    if tuya is not None:
+    if needs_internal_api(cfg):
         from .web.internal import create_internal_app
         host, port = parse_listen(cfg.internal_listen)
 
         async def serve_internal() -> None:
-            server = uvicorn.Server(uvicorn.Config(create_internal_app(catalog, tuya, cfg.internal_key),
-                                                    host=host, port=port, log_level="warning"))
+            internal = create_internal_app(catalog, tuya, cfg.internal_key, imou=imou)
+            server = uvicorn.Server(uvicorn.Config(internal, host=host, port=port, log_level="warning"))
             await server.serve()
 
         background.append(asyncio.create_task(supervise("internal-api", serve_internal)))
+    if tuya is not None:
         background.append(asyncio.create_task(supervise("tuya", tuya.run)))
-    else:
+    if imou is not None:
+        background.append(asyncio.create_task(supervise("imou", imou.run)))
+    if tuya is None and imou is None:
         background.append(asyncio.create_task(supervise("go2rtc-sync", lambda: sync_forever(sync, 600))))
     if tg_bot is not None:
         from .tg.bot import run_telegram

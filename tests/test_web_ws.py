@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from streemcam.identity import Identity
+from streemcam.imou.models import ImouCamera
 from streemcam.tuya.models import TuyaCamera
 
 USER = Identity("tg", 42)
@@ -237,3 +238,16 @@ def test_transcode_limit(make_web, make_cfg):
                 assert ws2.receive_text() == "echo:y"
                 _close_and_wait_released(client, web, ws2, expected=1)
             _close_and_wait_released(client, web, ws)
+
+
+@pytest.mark.parametrize("suffix,expected", [("", "imou_ab12cd"), ("&compat=1", "imou_ab12cd~h264")])
+def test_imou_streams(make_web, cfg, suffix, expected):
+    connected = []
+    web = make_web(cfg, upstream_connect=recording_connect(connected))
+    web.catalog.set_imou([ImouCamera("AB12CD", "Улица", True)])
+    with TestClient(web.app) as client:
+        with client.websocket_connect(ws_url(web, src="imou_ab12cd") + suffix) as ws:
+            ws.send_text("x")
+            assert ws.receive_text() == "echo:x"
+            _close_and_wait_released(client, web, ws)
+    assert connected == [expected]

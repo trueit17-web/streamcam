@@ -76,13 +76,14 @@ class CameraMonitor:
             state.alerted = True
             await self._alert(cam_id, False)
 
-    async def _check_tuya(self, cam: CameraInfo) -> None:
+    async def _check_cloud(self, cam: CameraInfo, snapshot_minutes: int) -> None:
+        """Облачные камеры (Tuya, Imou): статус из облака, снимок — изредка, чтобы не будить поток."""
         state = self._st(cam.id)
         state.online = cam.online
         if not cam.online:
             return
         now = self._clock()
-        if state.snapshot_at is not None and now - state.snapshot_at < self.cfg.tuya.snapshot_minutes * 60:
+        if state.snapshot_at is not None and now - state.snapshot_at < snapshot_minutes * 60:
             return
         image = await self._fetch_frame(cam.id)
         if image is not None:
@@ -91,7 +92,9 @@ class CameraMonitor:
 
     async def _check(self, cam: CameraInfo) -> None:
         if cam.kind == "tuya":
-            await self._check_tuya(cam)
+            await self._check_cloud(cam, self.cfg.tuya.snapshot_minutes)
+        elif cam.kind == "imou":
+            await self._check_cloud(cam, self.cfg.imou.snapshot_minutes)
         else:
             await self.probe(cam.id)
 

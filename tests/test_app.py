@@ -2,8 +2,10 @@ import asyncio
 
 import pytest
 
-from streemcam.app import alert_text, make_tg_bot, parse_listen, recording_config_warnings, supervise, sync_forever
+from streemcam.app import (alert_text, build_imou, make_tg_bot, needs_internal_api, parse_listen,
+                           recording_config_warnings, supervise, sync_forever)
 from streemcam.catalog import Catalog
+from streemcam.imou.service import ImouService
 
 
 def test_make_tg_bot_returns_none_for_invalid_token(caplog):
@@ -102,3 +104,22 @@ async def test_cleanup_forever_calls_cleanup(make_cfg, tmp_path):
             break
     task.cancel()
     assert calls[0] == ("2026-09-26", 3, 1)   # 22:00 UTC = 01:00 MSK следующего дня
+
+
+def test_build_imou_disabled(cfg):
+    assert build_imou(cfg, Catalog(cfg), sync=None, on_alert=None) is None
+
+
+def test_build_imou_enabled(make_cfg):
+    c = make_cfg(imou={"enabled": True, "app_id": "APP", "app_secret": "SECRET",
+                       "api_url": "https://openapi-fk.easy4ip.com/openapi"}, internal_key="k" * 20)
+    svc = build_imou(c, Catalog(c), sync=None, on_alert=None)
+    assert isinstance(svc, ImouService)
+    assert svc.client.api_url == "https://openapi-fk.easy4ip.com/openapi"
+
+
+def test_needs_internal_api(make_cfg):
+    key = {"internal_key": "k" * 20}
+    assert needs_internal_api(make_cfg()) is False
+    assert needs_internal_api(make_cfg(tuya={"enabled": True}, **key)) is True
+    assert needs_internal_api(make_cfg(imou={"enabled": True, "app_id": "a", "app_secret": "s"}, **key)) is True

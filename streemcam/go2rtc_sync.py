@@ -9,12 +9,20 @@ from .go2rtc_config import COMPAT_SUFFIX, LIVE_SUFFIX, compat_name, compat_src, 
 
 log = logging.getLogger(__name__)
 
-__all__ = ["COMPAT_SUFFIX", "LIVE_SUFFIX", "compat_name", "compat_src", "tuya_src", "desired_streams", "Go2rtcSync"]
+__all__ = ["COMPAT_SUFFIX", "LIVE_SUFFIX", "MANAGED_PREFIXES", "compat_name", "compat_src", "tuya_src", "imou_src",
+           "desired_streams", "Go2rtcSync"]
+
+MANAGED_PREFIXES = ("tuya_", "imou_")
 
 
 def tuya_src(internal_url: str, device_id: str, key: str) -> str:
     # device_id проверен Catalog.set_tuya (^[A-Za-z0-9]+$), key — Config (^[A-Za-z0-9_-]{16,}$)
     return f"echo:curl -fsS {internal_url}/tuya/{device_id}?key={key}"
+
+
+def imou_src(internal_url: str, device_id: str, key: str) -> str:
+    # device_id проверен Catalog.set_imou (^[A-Za-z0-9]+$)
+    return f"echo:curl -fsS {internal_url}/imou/{device_id}?key={key}"
 
 
 def desired_streams(catalog: Catalog, internal_url: str, key: str | None) -> dict[str, str]:
@@ -28,6 +36,9 @@ def desired_streams(catalog: Catalog, internal_url: str, key: str | None) -> dic
         streams[name] = tuya_src(internal_url, cam.device_id, key)
         streams[name + LIVE_SUFFIX] = tuya_live_src(name)
         streams[compat_name(name)] = tuya_compat_src(name)
+    for cam in catalog.imou():
+        streams[cam.id] = imou_src(internal_url, cam.device_id, key)
+        streams[compat_name(cam.id)] = compat_src(cam.id)
     return streams
 
 
@@ -71,12 +82,14 @@ class Go2rtcSync:
         streams = config.get("streams") or {}
         if not isinstance(streams, dict):
             streams = {}
+        loaded = {"tuya_": self._catalog.tuya_loaded, "imou_": self._catalog.imou_loaded}
+        managed = tuple(p for p in MANAGED_PREFIXES if loaded[p])
         current_managed = {name: _normalize_src(src) for name, src in streams.items()
-                           if name.startswith("tuya_")}
+                           if name.startswith(managed)}
         if current_managed == desired:
             return
 
-        new_streams = {name: src for name, src in streams.items() if not name.startswith("tuya_")}
+        new_streams = {name: src for name, src in streams.items() if not name.startswith(managed)}
         new_streams.update(desired)
         new_config = dict(config)
         new_config["streams"] = new_streams

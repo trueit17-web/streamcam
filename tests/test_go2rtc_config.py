@@ -108,3 +108,8 @@ def test_rec_stream_name(cfg, make_cfg, base_data):
     cams[0]["record"] = False
     assert rec_stream_name(make_cfg(cameras=cams), CameraInfo("yard", "Двор", "config")) is None
     assert rec_stream_name(cfg, CameraInfo("nope", "X", "config")) is None
+
+
+def test_rec_stream_name_imou_is_none(cfg):
+    from streemcam.go2rtc_config import rec_stream_name
+    assert rec_stream_name(cfg, CameraInfo("imou_ab12cd", "Улица", "imou", device_id="AB12CD")) is None

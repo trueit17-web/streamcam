@@ -139,3 +139,43 @@ def test_recording_validation(make_cfg, rec):
 
 def test_rtsp_url_trailing_slash(make_cfg):
     assert make_cfg(recording={"rtsp_url": "rtsp://go2rtc:8554/"}).recording.rtsp_url == "rtsp://go2rtc:8554"
+
+
+def test_imou_defaults(cfg):
+    assert cfg.imou.enabled is False
+    assert cfg.imou.api_url == "https://openapi.easy4ip.com/openapi"
+    assert (cfg.imou.refresh_minutes, cfg.imou.snapshot_minutes) == (10, 15)
+
+
+def test_imou_empty_strings_are_none(make_cfg):
+    c = make_cfg(imou={"app_id": "", "app_secret": ""})
+    assert c.imou.app_id is None and c.imou.app_secret is None
+
+
+def test_imou_api_url_trailing_slash_stripped(make_cfg):
+    assert make_cfg(imou={"api_url": "https://x/openapi/"}).imou.api_url == "https://x/openapi"
+
+
+@pytest.mark.parametrize("imou,msg", [
+    ({"enabled": True, "app_secret": "s"}, "app_id"),
+    ({"enabled": True, "app_id": "a"}, "app_secret"),
+])
+def test_imou_enabled_requires_keys(make_cfg, imou, msg):
+    with pytest.raises(ConfigError, match=msg):
+        make_cfg(imou=imou, internal_key="k" * 20)
+
+
+def test_imou_enabled_requires_internal_key(make_cfg):
+    with pytest.raises(ConfigError, match="internal_key"):
+        make_cfg(imou={"enabled": True, "app_id": "a", "app_secret": "s"})
+
+
+def test_imou_enabled_ok(make_cfg):
+    c = make_cfg(imou={"enabled": True, "app_id": "a", "app_secret": "s"}, internal_key="k" * 20)
+    assert (c.imou.app_id, c.imou.app_secret) == ("a", "s")
+
+
+def test_camera_id_must_not_start_with_imou(make_cfg, base_data):
+    cams = base_data["cameras"] + [{"id": "imou_x", "name": "X", "type": "rtsp", "url": "rtsp://x"}]
+    with pytest.raises(ConfigError, match="imou_"):
+        make_cfg(cameras=cams)
