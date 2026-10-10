@@ -1,0 +1,44 @@
+name: deploy
+
+# Обновляет прод после каждого слияния в main; можно запустить вручную.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HOST: ${{ secrets.PROD_SSH_HOST }}
+      PORT: ${{ secrets.PROD_SSH_PORT || '22' }}
+      USER_NAME: ${{ secrets.PROD_SSH_USER }}
+      DEPLOY_PATH: ${{ secrets.PROD_PATH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ключ SSH
+        id: ssh
+        env:
+          KEY: ${{ secrets.PROD_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$KEY" ] || [ -z "$KNOWN_HOSTS" ] || [ -z "$DEPLOY_PATH" ]; then
+            echo "::notice::Секреты PROD_* не заданы — деплой пропущен"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_prod && chmod 600 ~/.ssh/id_prod
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Деплой
+        if: steps.ssh.outputs.skip != 'true'
+        run: |
+          ssh -i ~/.ssh/id_prod -p "$PORT" -o StrictHostKeyChecking=yes "$USER_NAME@$HOST" \
+            "bash -s -- '$DEPLOY_PATH'" < deploy/remote-deploy.sh
