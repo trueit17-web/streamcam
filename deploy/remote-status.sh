@@ -53,7 +53,10 @@ for src in $(curl -fsS http://127.0.0.1:1984/api/streams </dev/null 2>/dev/null 
   [ -n "$cmd" ] || continue
   docker compose exec -T go2rtc sh -c "u=\$($cmd); u=\${u#ffmpeg:}; u=\${u%%#*}; \
     echo \"источник: \${u%%://*}, \$(echo \"\$u\" | sed -E 's#^[a-z]+://[^/]+##; s#\\?.*##; s#.*\\.##')\"; \
-    timeout 20 ffmpeg -hide_banner -v warning -i \"\$u\" -frames:v 1 -f null - 2>&1 | tail -n 15" </dev/null 2>&1 | redact
+    echo '-- ffmpeg -i (как есть):'; timeout 20 ffmpeg -hide_banner -v info -i \"\$u\" -frames:v 1 -f null - >/tmp/ff.log 2>&1; \
+    c=\$?; grep -vE '^ +(Metadata|[a-z_]+ +:)' /tmp/ff.log | tail -n 20; echo \"код \$c\"; \
+    echo '-- как go2rtc (nobuffer, copy + aac):'; timeout 20 ffmpeg -hide_banner -v warning -fflags nobuffer -flags low_delay -i \"\$u\" -c:v copy -c:a aac -t 3 -f null - >/tmp/ff.log 2>&1; \
+    c=\$?; tail -n 15 /tmp/ff.log; echo \"код \$c\"; rm -f /tmp/ff.log" </dev/null 2>&1 | redact
 done
 rm -f /tmp/streemcam-frame.$$
 echo "== go2rtc: последние строки"
