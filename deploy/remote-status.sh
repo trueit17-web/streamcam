@@ -40,13 +40,13 @@ redact() { sed -E 's#((https?|rtsps?)://[^/ "]+)[^ "]*#\1/***#g; s/(key|token|li
 
 echo "== кадры облачных камер (go2rtc /api/frame.jpeg)"
 for src in $(curl -fsS http://127.0.0.1:1984/api/streams </dev/null 2>/dev/null \
-             | grep -oE '"(imou|tuya)_[a-z0-9]+"' | tr -d '"' | sort -u); do
+             | grep -oE '"(imou|tuya)_[a-z0-9]+(~h264)?"' | tr -d '"' | sort -u); do
   res=$(curl -sS -m 25 -o /tmp/streemcam-frame.$$ -w "%{http_code} %{size_download}" \
         "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)
   echo "$src: $res"
   case "$res" in 200*) continue ;; esac
   head -c 400 /tmp/streemcam-frame.$$ | redact; echo
-  case "$src" in imou_*) ;; *) continue ;; esac
+  case "$src" in imou_*~*) continue ;; imou_*) ;; *) continue ;; esac
   # что именно не нравится ffmpeg во входном потоке
   cmd=$(curl -fsS "http://127.0.0.1:1984/api/streams?src=$src" </dev/null 2>/dev/null \
         | grep -oE 'echo:curl [^"]*' | head -1 | sed 's/^echo://; s/\\u0026/\&/g')
