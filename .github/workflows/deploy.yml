@@ -20,7 +20,7 @@ jobs:
       USER_NAME: ${{ secrets.PROD_SSH_USER }}
       DEPLOY_PATH: ${{ secrets.PROD_PATH }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Ключ SSH
         id: ssh
