@@ -49,6 +49,30 @@ for src in $(curl -fsS http://127.0.0.1:1984/api/streams </dev/null 2>/dev/null 
   head -c 400 /tmp/streemcam-frame.$$ | redact; echo
 done
 rm -f /tmp/streemcam-frame.$$
+# названия домов и камер в публичный лог не пишем — только количества
+echo "== группы «дом» в списке камер"
+docker compose exec -T streemcam python -c '
+import collections, json, time, urllib.request
+from streemcam.config import load_config
+from streemcam.tokens import sign
+cfg = load_config("/app/config.yaml")
+admin = cfg.admins.telegram[0] if cfg.admins.telegram else None
+if admin is None:
+    raise SystemExit("нет admins.telegram — пропускаю")
+token = sign({"typ": "session", "p": "tg", "u": admin, "exp": time.time() + 60}, cfg.secret)
+req = urllib.request.Request("http://127.0.0.1:%d/api/cameras" % cfg.listen_port,
+                             headers={"Authorization": "Bearer " + token})
+cams = json.load(urllib.request.urlopen(req, timeout=10))["cameras"]
+groups = collections.Counter(c["home"] for c in cams)
+print("камер: %d, групп с домом: %d, без дома: %d" % (len(cams), len([h for h in groups if h]), groups.get(None, 0)))
+for i, (home, n) in enumerate(sorted(((h, n) for h, n in groups.items() if h), key=lambda x: x[0]), 1):
+    print("  дом %d: %d камер" % (i, n))
+ids = {c["id"] for c in cams}
+names = {c["name"] for c in cams}
+unmatched = [k for k in cfg.homes if k not in ids and k not in names]
+print("homes: записей %d, не совпали ни с id, ни с названием камеры: %d" % (len(cfg.homes), len(unmatched)))
+print("imou.home задан: %s, аккаунтов imou.accounts с home: %d" % (bool(cfg.imou.home), sum(1 for a in cfg.imou.accounts if a.home)))
+' </dev/null 2>&1 | tail -n 20 | redact
 echo "== go2rtc: последние строки"
 docker compose logs --tail 40 --no-color go2rtc | redact
 

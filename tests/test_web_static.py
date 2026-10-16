@@ -44,3 +44,15 @@ def test_inline_card_playback_present(web):
     assert "muted" in js
     assert "#cams video-stream" in js
     assert "ondisconnect" in js
+
+
+def test_assets_versioned_by_content(web):
+    import hashlib
+    import re
+
+    from streemcam.web.server import STATIC_DIR
+    html = TestClient(web.app).get("/").text
+    for name in ("app.js", "style.css"):
+        digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:10]
+        assert f'/static/{name}?v={digest}"' in html
+    assert not re.search(r'/static/app\.js"', html)
