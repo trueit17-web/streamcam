@@ -80,10 +80,11 @@ def test_homes(base_data):
     base_data["homes"] = {"gate": "Офис", "Двор мамы": "Мама", "tuya_bf2": "Гараж", "Ю": "не выиграет у id"}
     c = Catalog(parse_config(base_data))
     c.set_tuya([TuyaCamera("bf1", "Я", True, home="Мой дом"), TuyaCamera("bf2", "Ю", True, home="Мой дом")])
-    c.set_imou([ImouCamera("AB12CD", "Улица", True), ImouCamera("SH1", "Двор мамы", True)])
+    c.set_imou([ImouCamera("AB12CD", "Улица", True), ImouCamera("SH1", "Двор мамы", True),
+                ImouCamera("OW1", "Ворота", True, home="Дом владельца")])
     assert [(x.id, x.home) for x in c.all()] == [
         ("yard", "Дача"), ("gate", "Офис"), ("room", None), ("tuya_bf2", "Гараж"), ("tuya_bf1", "Мой дом"),
-        ("imou_sh1", "Мама"), ("imou_ab12cd", "Город")]
+        ("imou_ow1", "Дом владельца"), ("imou_sh1", "Мама"), ("imou_ab12cd", "Город")]
     c.mark_tuya_offline()
     c.mark_imou_offline()
     assert (c.get("tuya_bf1").home, c.get("imou_ab12cd").home) == ("Мой дом", "Город")

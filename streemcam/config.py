@@ -90,6 +90,25 @@ class TuyaConfig(BaseModel):
     snapshot_minutes: int = 15
 
 
+class ImouAccount(BaseModel):
+    """Ещё один аккаунт Imou (например, владельца камер другого дома): облако отдаёт видео
+    только с камер, привязанных к аккаунту, чьи ключи используются."""
+    app_id: str | None = None
+    app_secret: str | None = None
+    api_url: str = "https://openapi.easy4ip.com/openapi"
+    home: str | None = None  # дом для камер этого аккаунта
+
+    @field_validator("app_id", "app_secret", mode="before")
+    @classmethod
+    def _empty_is_none(cls, v):
+        return v or None
+
+    @field_validator("api_url")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.rstrip("/")
+
+
 class ImouConfig(BaseModel):
     enabled: bool = False
     app_id: str | None = None
@@ -98,6 +117,7 @@ class ImouConfig(BaseModel):
     refresh_minutes: int = 10
     snapshot_minutes: int = 15
     home: str | None = None  # группа «дом» для всех камер Imou
+    accounts: list[ImouAccount] = []  # аккаунты без ключей пропускаются
 
     @field_validator("app_id", "app_secret", mode="before")
     @classmethod

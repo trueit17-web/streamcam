@@ -88,7 +88,7 @@ class Catalog:
                 continue
             infos.append(CameraInfo(imou_cam_id(cam.device_id), cam.name, "imou",
                                     device_id=cam.device_id, online=cam.online,
-                                    home=self._home(imou_cam_id(cam.device_id), cam.name, self._imou_home)))
+                                    home=self._home(imou_cam_id(cam.device_id), cam.name, cam.home or self._imou_home)))
         self._imou = sorted(infos, key=lambda c: c.name)
         self.imou_loaded = True
 

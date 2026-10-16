@@ -14,3 +14,4 @@ class ImouCamera:
     device_id: str
     name: str
     online: bool
+    home: str | None = None

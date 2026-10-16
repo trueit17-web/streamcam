@@ -33,7 +33,13 @@ def build_imou(cfg: Config, catalog: Catalog, sync, on_alert):
         return None
     from .imou.client import ImouClient
     from .imou.service import ImouService
-    client = ImouClient(cfg.imou.app_id, cfg.imou.app_secret, cfg.imou.api_url, httpx.AsyncClient(timeout=15))
+    http = httpx.AsyncClient(timeout=15)
+    client = ImouClient(cfg.imou.app_id, cfg.imou.app_secret, cfg.imou.api_url, http)
+    extra = [a for a in cfg.imou.accounts if a.app_id and a.app_secret]
+    if extra:
+        from .imou.multi import MultiImouClient
+        client = MultiImouClient([(client, None)] + [
+            (ImouClient(a.app_id, a.app_secret, a.api_url, http), a.home) for a in extra])
     return ImouService(cfg, catalog, client, sync=sync, on_alert=on_alert)
 
 
