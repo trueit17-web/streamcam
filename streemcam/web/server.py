@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import hashlib
 import logging
 import time
 from pathlib import Path
@@ -8,7 +9,7 @@ from urllib.parse import urlencode
 import anyio
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.websockets import WebSocketDisconnect
@@ -31,6 +32,17 @@ log = logging.getLogger(__name__)
 GO2RTC_JS = {"video-rtc.js", "video-stream.js"}
 STATIC_DIR = Path(__file__).parent / "static"
 ARCHIVE_CHUNK_SIZE = 64 * 1024
+VERSIONED_ASSETS = ("app.js", "style.css")
+
+
+def _index_html() -> str:
+    """index.html со ссылками на app.js/style.css вида ?v=<хеш>: WebView Telegram кеширует статику,
+    и без смены адреса после деплоя открывается старый интерфейс."""
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for name in VERSIONED_ASSETS:
+        digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:10]
+        html = html.replace(f"/static/{name}\"", f"/static/{name}?v={digest}\"")
+    return html
 
 
 async def _stream_file(path: Path, size: int):
@@ -125,6 +137,7 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
                http: httpx.AsyncClient, upstream_connect=None, archive: Archive | None = None,
                refresh_status=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    index_html = _index_html()
     refresh_lock = asyncio.Lock()
     last_refresh: list[float] = []
     upstream_connect = upstream_connect or default_upstream(cfg.go2rtc_url)
@@ -305,7 +318,7 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
 
     @app.get("/")
     async def index():
-        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+        return HTMLResponse(index_html, headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
