@@ -8,6 +8,9 @@ cd "${1:?usage: remote-status.sh <path to streamcam checkout> [log hours]}" || e
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
 
 hours="${2:-1}"
+
+# логи Actions публичны: от ссылок оставляем только схему и хост
+redact() { sed -E 's#((https?|rtsps?)://[^/ "]+)[^ "]*#\1/***#g; s/(key|token|liveToken)=[^&" ]*/\1=***/g'; }
 failed=0
 
 echo "== версия: $(git rev-parse --short HEAD) ($(git log -1 --format=%cd --date=iso))"
@@ -33,7 +36,21 @@ free -m
 
 echo "== предупреждения и ошибки за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam go2rtc 2>&1 \
-  | grep -Ei "warn|error|exception|traceback|fail" | tail -n 100 || echo "(нет)"
+  | grep -Ei "warn|error|exception|traceback|fail" | tail -n 100 | redact
+
+# Imou отдаёт H.265, кадр go2rtc режет только из H.264-копии (~h264): её и проверяем
+echo "== кадры облачных камер (go2rtc /api/frame.jpeg)"
+for src in $(curl -fsS http://127.0.0.1:1984/api/streams </dev/null 2>/dev/null \
+             | grep -oE '"(tuya_[a-z0-9]+|imou_[a-z0-9]+~h264)"' | tr -d '"' | sort -u); do
+  res=$(curl -sS -m 25 -o /tmp/streemcam-frame.$$ -w "%{http_code} %{size_download}" \
+        "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)
+  echo "$src: $res"
+  case "$res" in 200*) continue ;; esac
+  head -c 400 /tmp/streemcam-frame.$$ | redact; echo
+done
+rm -f /tmp/streemcam-frame.$$
+echo "== go2rtc: последние строки"
+docker compose logs --tail 40 --no-color go2rtc | redact
 
 echo "== go2rtc-config (генерация go2rtc.yaml из config.yaml)"
 docker compose logs --tail 10 --no-color go2rtc-config

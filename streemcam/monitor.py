@@ -8,6 +8,7 @@ import httpx
 
 from .catalog import CameraInfo, Catalog
 from .config import Config
+from .go2rtc_config import compat_name
 
 log = logging.getLogger(__name__)
 
@@ -85,7 +86,8 @@ class CameraMonitor:
         now = self._clock()
         if state.snapshot_at is not None and now - state.snapshot_at < snapshot_minutes * 60:
             return
-        image = await self._fetch_frame(cam.id)
+        # Imou отдаёт H.265, а кадр из него go2rtc не вырезает (ffmpeg exit 183) — берём H.264-копию
+        image = await self._fetch_frame(compat_name(cam.id) if cam.kind == "imou" else cam.id)
         if image is not None:
             state.snapshot = image
             state.snapshot_at = now
