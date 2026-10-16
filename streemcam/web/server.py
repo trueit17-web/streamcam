@@ -164,7 +164,8 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
             "max_streams": cfg.max_streams_per_user,
             "max_transcodes": cfg.max_transcodes,
             "recording": archive is not None,
-            "cameras": [{"id": c.id, "name": c.name, "kind": c.kind, "online": monitor.is_online(c.id)}
+            "cameras": [{"id": c.id, "name": c.name, "kind": c.kind, "online": monitor.is_online(c.id),
+                         "home": c.home}
                         for c in catalog.all()],
         }
 

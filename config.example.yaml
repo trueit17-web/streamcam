@@ -28,6 +28,11 @@ imou:
   # api_url: https://openapi-fk.easy4ip.com/openapi   # если аккаунт в другом регионе
   refresh_minutes: 10
   snapshot_minutes: 15
+  # home: Город             # дом для всех камер Imou в списке
+
+# Дом для отдельных камер по id (перекрывает дом из Tuya/imou.home/камеры):
+# homes:
+#   imou_ab12cd34: Дача
 
 telegram:
   bot_token: ${TELEGRAM_BOT_TOKEN:-}

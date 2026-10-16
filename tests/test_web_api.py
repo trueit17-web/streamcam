@@ -26,9 +26,9 @@ def test_tg_session_and_cameras(web):
     assert body["max_streams"] == 4
     assert body["max_transcodes"] == 2
     assert body["cameras"] == [
-        {"id": "yard", "name": "Двор", "kind": "config", "online": True},
-        {"id": "gate", "name": "Ворота", "kind": "config", "online": False},
-        {"id": "room", "name": "Комната", "kind": "config", "online": None},
+        {"id": "yard", "name": "Двор", "kind": "config", "online": True, "home": None},
+        {"id": "gate", "name": "Ворота", "kind": "config", "online": False, "home": None},
+        {"id": "room", "name": "Комната", "kind": "config", "online": None, "home": None},
     ]
 
 
@@ -93,11 +93,12 @@ def test_snapshot(web):
 
 def test_cameras_include_tuya(web):
     from streemcam.tuya.models import TuyaCamera
-    web.catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
+    web.catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True, "Дача")])
     client = TestClient(web.app)
     h = bearer(web.access.issue_session(USER))
     cams = client.get("/api/cameras", headers=h).json()["cameras"]
-    assert cams[-1] == {"id": "tuya_bf1", "name": "Прихожая", "kind": "tuya", "online": None}
+    assert cams[-1] == {"id": "tuya_bf1", "name": "Прихожая", "kind": "tuya", "online": None,
+                        "home": "Дача"}
     assert client.get("/api/snapshot/tuya_bf1", headers=h).status_code == 404  # снимка ещё нет
 
 
