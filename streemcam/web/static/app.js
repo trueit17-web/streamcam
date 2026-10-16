@@ -5,10 +5,8 @@ const tg = window.Telegram?.WebApp;
 let token = null;
 let info = null;
 let currentCams = [];
-function loadCompat() {
-  try { return localStorage.getItem("sc_compat") === "1"; } catch { return false; }
-}
-let compat = loadCompat();
+// Перекодирование в H.264 (compat=1) из интерфейса убрано по просьбе пользователя; сервер его по-прежнему умеет.
+const compat = false;
 
 function store(key, value) {
   try { sessionStorage.setItem(key, value); } catch {}
@@ -407,18 +405,6 @@ $("#grid").onclick = () => {
   liveHome = null;
   renderList();
 };
-function applyCompatUi() {
-  $("#compat").checked = compat;
-  $("#compat-hint").hidden = !compat;
-}
-$("#compat").onchange = () => {
-  compat = $("#compat").checked;
-  try { localStorage.setItem("sc_compat", compat ? "1" : "0"); } catch {}
-  applyCompatUi();
-  if (!$("#viewer").hidden && currentCams.length) openCameras(currentCams);
-  else if (liveMode && liveHome && !$("#cams").hidden) renderList();
-};
-applyCompatUi();
 
 async function main() {
   try {

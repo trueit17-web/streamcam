@@ -13,11 +13,10 @@ def test_index_and_assets(web):
     assert client.get("/static/style.css").status_code == 200
 
 
-def test_compat_toggle_present(web):
+def test_compat_toggle_removed(web):
     client = TestClient(web.app)
-    assert 'id="compat"' in client.get("/").text
-    js = client.get("/static/app.js").text
-    assert "compat=1" in js and "sc_compat" in js
+    assert 'id="compat"' not in client.get("/").text
+    assert "#compat" not in client.get("/static/app.js").text
 
 
 def test_archive_ui_present(web):
