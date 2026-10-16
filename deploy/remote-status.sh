@@ -3,10 +3,15 @@
 set -uo pipefail
 
 cd "${1:?usage: remote-status.sh <path to streamcam checkout> [log hours]}" || exit 1
+
+# клон может принадлежать другому пользователю (например, root): без этого git отказывается работать
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+
 hours="${2:-1}"
 failed=0
 
 echo "== версия: $(git rev-parse --short HEAD) ($(git log -1 --format=%cd --date=iso))"
+echo "== владелец клона: $(stat -c %U .git), ssh-пользователь: $(id -un)"
 echo "== контейнеры"
 docker compose ps
 for svc in go2rtc streemcam; do

@@ -4,6 +4,9 @@ set -euo pipefail
 
 cd "${1:?usage: remote-deploy.sh <path to streamcam checkout>}"
 
+# клон может принадлежать другому пользователю (например, root): без этого git отказывается работать
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+
 echo "== было: $(git rev-parse --short HEAD)"
 git fetch --quiet origin main
 git merge --ff-only origin/main
