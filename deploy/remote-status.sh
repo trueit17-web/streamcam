@@ -35,18 +35,29 @@ echo "== предупреждения и ошибки за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam go2rtc 2>&1 \
   | grep -Ei "warn|error|exception|traceback|fail" | tail -n 100 || echo "(нет)"
 
+# логи Actions публичны: от ссылок оставляем только схему и хост
+redact() { sed -E 's#((https?|rtsps?)://[^/ "]+)[^ "]*#\1/***#g; s/(key|token|liveToken)=[^&" ]*/\1=***/g'; }
+
 echo "== кадры облачных камер (go2rtc /api/frame.jpeg)"
 for src in $(curl -fsS http://127.0.0.1:1984/api/streams </dev/null 2>/dev/null \
              | grep -oE '"(imou|tuya)_[a-z0-9]+"' | tr -d '"' | sort -u); do
-  body=$(curl -sS -m 25 -o /tmp/streemcam-frame.$$ -w "%{http_code} %{size_download}" \
-         "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)
-  echo "$src: $body"
-  case "$body" in 200*) ;; *) head -c 400 /tmp/streemcam-frame.$$ \
-    | sed -E 's/(key|token|liveToken)=[^&" ]*/\1=***/g'; echo ;; esac
+  res=$(curl -sS -m 25 -o /tmp/streemcam-frame.$$ -w "%{http_code} %{size_download}" \
+        "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)
+  echo "$src: $res"
+  case "$res" in 200*) continue ;; esac
+  head -c 400 /tmp/streemcam-frame.$$ | redact; echo
+  case "$src" in imou_*) ;; *) continue ;; esac
+  # что именно не нравится ffmpeg во входном потоке
+  cmd=$(curl -fsS "http://127.0.0.1:1984/api/streams?src=$src" </dev/null 2>/dev/null \
+        | grep -oE 'echo:curl [^"]*' | head -1 | sed 's/^echo://; s/\\u0026/\&/g')
+  [ -n "$cmd" ] || continue
+  docker compose exec -T go2rtc sh -c "u=\$($cmd); u=\${u#ffmpeg:}; u=\${u%%#*}; \
+    echo \"источник: \${u%%://*}, \$(echo \"\$u\" | sed -E 's#^[a-z]+://[^/]+##; s#\\?.*##; s#.*\\.##')\"; \
+    timeout 20 ffmpeg -hide_banner -v warning -i \"\$u\" -frames:v 1 -f null - 2>&1 | tail -n 15" </dev/null 2>&1 | redact
 done
 rm -f /tmp/streemcam-frame.$$
 echo "== go2rtc: последние строки"
-docker compose logs --tail 40 --no-color go2rtc | sed -E 's/(key|token|liveToken)=[^&" ]*/\1=***/g'
+docker compose logs --tail 40 --no-color go2rtc | redact
 
 echo "== go2rtc-config (генерация go2rtc.yaml из config.yaml)"
 docker compose logs --tail 10 --no-color go2rtc-config
