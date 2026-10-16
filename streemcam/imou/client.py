@@ -160,21 +160,16 @@ class ImouClient:
         return None
 
     async def _cloud_rtsp(self, device_id: str) -> str | None:
-        # getStreamUrl работает и для камер, которыми поделились; HLS для них недоступен
+        # запасной путь, если HLS не отдали; OP1009 здесь — нет прав на эту камеру, а не плохой ключ
         try:
             data = await self._call("getStreamUrl", {"deviceId": device_id, "channelId": "0", "streamId": 0})
-        except ImouAuthError:
-            raise
         except ImouError as e:
-            log.info("imou cloud rtsp for %s unavailable, using hls: %s", device_id, e)
+            log.info("imou cloud rtsp for %s unavailable: %s", device_id, e)
             return None
         url = data.get("url") or ""
         return url if url.startswith(("rtsp://", "rtsps://")) else None
 
-    async def stream_url(self, device_id: str) -> str:
-        url = await self._cloud_rtsp(device_id)
-        if url:
-            return url
+    async def _hls_url(self, device_id: str) -> str:
         url = await self._live_hls(device_id)
         if url:
             return url
@@ -187,3 +182,15 @@ class ImouClient:
         if not url:
             raise ImouError(f"no live stream for {device_id}")
         return url
+
+    async def stream_url(self, device_id: str) -> str:
+        # HLS работает для своих камер; облачный RTSP Imou ffmpeg не открывает, он только запасной
+        try:
+            return await self._hls_url(device_id)
+        except ImouError as e:
+            hls_error = e
+        log.info("imou hls for %s unavailable, trying cloud rtsp: %s", device_id, hls_error)
+        url = await self._cloud_rtsp(device_id)
+        if url:
+            return url
+        raise hls_error
