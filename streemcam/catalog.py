@@ -36,7 +36,8 @@ class Catalog:
     """Единый список камер: из config.yaml (статично) + камеры Tuya и Imou (обновляются в рантайме)."""
 
     def __init__(self, cfg: Config):
-        self._config = [CameraInfo(c.id, c.name, "config", home=cfg.homes.get(c.id, c.home))
+        self._homes = dict(cfg.homes)
+        self._config = [CameraInfo(c.id, c.name, "config", home=self._home(c.id, c.name, c.home))
                         for c in cfg.cameras]
         self._tuya: list[CameraInfo] = []
         self._imou: list[CameraInfo] = []
@@ -45,7 +46,10 @@ class Catalog:
         self.tuya_loaded = not cfg.tuya.enabled
         self.imou_loaded = not cfg.imou.enabled
         self._imou_home = cfg.imou.home
-        self._homes = dict(cfg.homes)
+
+    def _home(self, cam_id: str, name: str, default: str | None) -> str | None:
+        """config.homes: ключ — id камеры или её название; id важнее."""
+        return self._homes.get(cam_id) or self._homes.get(name) or default
 
     def all(self) -> list[CameraInfo]:
         return self._config + self._tuya + self._imou
@@ -64,7 +68,7 @@ class Catalog:
                 continue
             infos.append(CameraInfo(tuya_cam_id(cam.device_id), cam.name, "tuya",
                                     device_id=cam.device_id, online=cam.online,
-                                    home=self._homes.get(tuya_cam_id(cam.device_id), cam.home)))
+                                    home=self._home(tuya_cam_id(cam.device_id), cam.name, cam.home)))
         self._tuya = sorted(infos, key=lambda c: c.name)
         self.tuya_loaded = True
 
@@ -84,7 +88,7 @@ class Catalog:
                 continue
             infos.append(CameraInfo(imou_cam_id(cam.device_id), cam.name, "imou",
                                     device_id=cam.device_id, online=cam.online,
-                                    home=self._homes.get(imou_cam_id(cam.device_id), self._imou_home)))
+                                    home=self._home(imou_cam_id(cam.device_id), cam.name, self._imou_home)))
         self._imou = sorted(infos, key=lambda c: c.name)
         self.imou_loaded = True
 
