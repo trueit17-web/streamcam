@@ -135,12 +135,13 @@ async def test_imou_status_from_cloud_and_rare_snapshots(make_cfg, alerts):
 
     await m.probe_all()
     assert m.is_online("imou_ab12cd") is True and m.is_online("imou_ef34") is False
-    assert requested.count("imou_ab12cd") == 1 and "imou_ef34" not in requested
+    assert requested.count("imou_ab12cd~h264") == 1 and not any(r.startswith("imou_ef34") for r in requested)
     assert m.snapshot("imou_ab12cd") == b"JPEG"
 
     clock.t = 10 * 60  # больше tuya.snapshot_minutes, меньше imou.snapshot_minutes
     await m.probe_all()
-    assert requested.count("imou_ab12cd") == 1
+    assert requested.count("imou_ab12cd~h264") == 1
     clock.t = 20 * 60
     await m.probe_all()
-    assert requested.count("imou_ab12cd") == 2
+    assert requested.count("imou_ab12cd~h264") == 2
+    assert "imou_ab12cd" not in requested
