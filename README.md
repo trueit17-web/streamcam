@@ -63,7 +63,7 @@ Xiaomi Smart Camera C701 — model chuangmi.camera.079ae2 (поддержива�
 
 ## Камеры Imou (облако)
 Для камер Imou (например, IPC-C32EP), до которых VPS не достаёт по сети. Только просмотр, без записи;
-поток идёт через облако Imou (облачный RTSP, если недоступен — HLS), поэтому задержка — несколько секунд.
+поток идёт через облако Imou (HLS, если недоступен — облачный RTSP), поэтому задержка — несколько секунд.
 1. Зарегистрируйтесь на [open.imoulife.com](https://open.imoulife.com) тем же аккаунтом, что в приложении
    Imou Life, создайте приложение и скопируйте `appId` и `appSecret`.
 2. В `.env`: `IMOU_APP_ID`, `IMOU_APP_SECRET` и `STREEMCAM_INTERNAL_KEY`; в `config.yaml`: `imou.enabled: true`.
