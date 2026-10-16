@@ -35,6 +35,9 @@ echo "== предупреждения и ошибки за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam go2rtc 2>&1 \
   | grep -Ei "warn|error|exception|traceback|fail" | tail -n 100 || echo "(нет)"
 
+echo "== go2rtc-config (генерация go2rtc.yaml из config.yaml)"
+docker compose logs --tail 10 --no-color go2rtc-config
+
 echo "== последние строки streemcam"
 docker compose logs --tail 30 --no-color streemcam
 

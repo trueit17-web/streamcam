@@ -13,7 +13,12 @@ git merge --ff-only origin/main
 echo "== стало: $(git rev-parse --short HEAD)"
 
 # go2rtc-config перерисовывает go2rtc.yaml из config.yaml, go2rtc сам его не перечитывает
-docker compose up -d --build --force-recreate go2rtc-config go2rtc streemcam
+if ! docker compose up -d --build --force-recreate go2rtc-config go2rtc streemcam; then
+  echo "!! сервисы не поднялись" >&2
+  docker compose ps -a
+  docker compose logs --tail 50 --no-color go2rtc-config go2rtc streemcam
+  exit 1
+fi
 docker compose up -d --remove-orphans
 
 echo "== проверка http://127.0.0.1:8080/"
