@@ -151,7 +151,13 @@ async def run(cfg: Config) -> None:
         recorder = Recorder(cfg, catalog, on_alert=on_admin_alert)
 
     monitor = CameraMonitor(cfg, catalog, http, on_alert)
-    app = create_app(cfg, catalog, access, monitor, access.registry, http, archive=archive)
+
+    async def refresh_status() -> None:
+        await asyncio.gather(*(svc.refresh() for svc in (tuya, imou) if svc is not None))
+        await monitor.probe_all()
+
+    app = create_app(cfg, catalog, access, monitor, access.registry, http, archive=archive,
+                     refresh_status=refresh_status)
     server = uvicorn.Server(uvicorn.Config(app, host=cfg.listen_host, port=cfg.listen_port,
                                            proxy_headers=True, forwarded_allow_ips="*"))
 

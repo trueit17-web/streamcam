@@ -19,8 +19,11 @@ def create_internal_app(catalog: Catalog, tuya, internal_key: str | None, imou=N
     async def tuya_stream(device_id: str, key: str = ""):
         if not internal_key or not hmac.compare_digest(key.encode(), internal_key.encode()):
             return PlainTextResponse("forbidden", status_code=403)
-        if tuya is None or not any(c.device_id == device_id for c in catalog.tuya()):
+        cam = next((c for c in catalog.tuya() if c.device_id == device_id), None)
+        if tuya is None or cam is None:
             return PlainTextResponse("unknown device", status_code=404)
+        if not cam.online:
+            return PlainTextResponse("camera offline", status_code=503)
         if not tuya.logged_in:
             return PlainTextResponse("not logged in to Tuya", status_code=503)
         try:
@@ -34,8 +37,11 @@ def create_internal_app(catalog: Catalog, tuya, internal_key: str | None, imou=N
     async def imou_stream(device_id: str, key: str = ""):
         if not internal_key or not hmac.compare_digest(key.encode(), internal_key.encode()):
             return PlainTextResponse("forbidden", status_code=403)
-        if imou is None or not any(c.device_id == device_id for c in catalog.imou()):
+        cam = next((c for c in catalog.imou() if c.device_id == device_id), None)
+        if imou is None or cam is None:
             return PlainTextResponse("unknown device", status_code=404)
+        if not cam.online:  # офлайн по облаку: не тратим запрос и не будим камеру
+            return PlainTextResponse("camera offline", status_code=503)
         try:
             url = await imou.stream_url(device_id)
         except ImouError as e:

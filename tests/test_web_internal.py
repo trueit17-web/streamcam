@@ -120,3 +120,14 @@ def test_tuya_disabled_imou_enabled(cfg):
     catalog.set_tuya([TuyaCamera("bf1", "Прихожая", True)])
     client = TestClient(create_internal_app(catalog, None, KEY, imou=FakeImou()))
     assert client.get(f"/tuya/bf1?key={KEY}").status_code == 404
+
+
+def test_offline_cameras_not_asked(cfg):
+    catalog = Catalog(cfg)
+    catalog.set_imou([ImouCamera("AB12CD", "Улица", False)])
+    catalog.set_tuya([TuyaCamera("bf1", "Прихожая", False)])
+    imou, tuya = FakeImou(), FakeTuya()
+    client = TestClient(create_internal_app(catalog, tuya, KEY, imou=imou))
+    assert client.get(f"/imou/AB12CD?key={KEY}").status_code == 503
+    assert client.get(f"/tuya/bf1?key={KEY}").status_code == 503
+    assert imou.asked == []

@@ -109,3 +109,29 @@ def test_go2rtc_js_proxy_whitelist(web):
     assert r.text == "// video-stream"
     assert "javascript" in r.headers["content-type"]
     assert client.get("/go2rtc/api.js").status_code == 404
+
+
+def test_cameras_refresh_throttled(web, monkeypatch):
+    from streemcam.web import server
+    calls = []
+
+    async def refresh_status():
+        calls.append(1)
+    now = [1000.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    client = TestClient(web.make_app(refresh_status=refresh_status))
+    h = bearer(web.access.issue_session(USER))
+    assert client.post("/api/cameras/refresh").status_code == 401
+    r = client.post("/api/cameras/refresh", headers=h)
+    assert r.status_code == 200 and "cameras" in r.json()
+    client.post("/api/cameras/refresh", headers=h)
+    assert len(calls) == 1
+    now[0] += server.REFRESH_MIN_SECONDS
+    client.post("/api/cameras/refresh", headers=h)
+    assert len(calls) == 2
+
+
+def test_cameras_refresh_without_cloud(web):
+    client = TestClient(web.app)
+    h = bearer(web.access.issue_session(USER))
+    assert client.post("/api/cameras/refresh", headers=h).status_code == 200

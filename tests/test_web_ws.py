@@ -111,6 +111,14 @@ def test_rejects_unknown_camera(web):
         assert e.value.code == 4404
 
 
+def test_rejects_offline_camera(web):
+    with TestClient(web.app) as client:
+        with pytest.raises(WebSocketDisconnect) as e:
+            with client.websocket_connect(ws_url(web, src="gate")):  # StubMonitor: gate офлайн
+                pass
+        assert e.value.code == 4410
+
+
 def test_stream_limit(make_web, make_cfg):
     web = make_web(make_cfg(max_streams_per_user=1))
     with TestClient(web.app) as client:
@@ -118,7 +126,7 @@ def test_stream_limit(make_web, make_cfg):
             ws.send_text("x")
             ws.receive_text()
             with pytest.raises(WebSocketDisconnect) as e:
-                with client.websocket_connect(ws_url(web, src="gate")):
+                with client.websocket_connect(ws_url(web, src="room")):
                     pass
             assert e.value.code == 4429
             _close_and_wait_released(client, web, ws)
@@ -230,10 +238,10 @@ def test_transcode_limit(make_web, make_cfg):
             ws.send_text("x")
             ws.receive_text()
             with pytest.raises(WebSocketDisconnect) as e:
-                with client.websocket_connect(ws_url(web, src="gate") + "&compat=1"):
+                with client.websocket_connect(ws_url(web, src="room") + "&compat=1"):
                     pass
             assert e.value.code == 4430
-            with client.websocket_connect(ws_url(web, src="gate")) as ws2:  # без compat — можно
+            with client.websocket_connect(ws_url(web, src="room")) as ws2:  # без compat — можно
                 ws2.send_text("y")
                 assert ws2.receive_text() == "echo:y"
                 _close_and_wait_released(client, web, ws2, expected=1)
