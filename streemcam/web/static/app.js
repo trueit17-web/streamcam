@@ -5,10 +5,8 @@ const tg = window.Telegram?.WebApp;
 let token = null;
 let info = null;
 let currentCams = [];
-function loadCompat() {
-  try { return localStorage.getItem("sc_compat") === "1"; } catch { return false; }
-}
-let compat = loadCompat();
+// Перекодирование в H.264 (compat=1) из интерфейса убрано по просьбе пользователя; сервер его по-прежнему умеет.
+const compat = false;
 
 function store(key, value) {
   try { sessionStorage.setItem(key, value); } catch {}
@@ -182,6 +180,33 @@ const NO_HOME = "Другие камеры";
 // Раскрытые дома живут только в памяти: по умолчанию все свёрнуты,
 // но периодическая перерисовка списка не должна их сворачивать.
 const openHomes = new Set();
+// Режим Live: в списке только дома; раскрытый дом сразу показывает видео всех своих онлайн-камер.
+// Раскрыт не больше одного дома — иначе упрёмся в лимит потоков на пользователя.
+let liveMode = false;
+let liveHome = null;
+
+function liveCards(cams) {
+  const online = cams.filter((c) => c.online !== false);
+  const shown = online.slice(0, info.max_streams);
+  const items = shown.map((cam) => {
+    const li = document.createElement("li");
+    li.className = "live-cam";
+    li.dataset.camId = cam.id;
+    li.append(player(cam));
+    return li;
+  });
+  const notes = [];
+  if (online.length > shown.length) notes.push(`ещё ${online.length - shown.length} не показаны: лимит ${info.max_streams} потоков`);
+  if (cams.length > online.length) notes.push(`офлайн: ${cams.length - online.length}`);
+  if (!shown.length && !notes.length) notes.push("нет камер");
+  if (notes.length) {
+    const li = document.createElement("li");
+    li.className = "live-note";
+    li.textContent = notes.join(" · ");
+    items.push(li);
+  }
+  return items;
+}
 
 function camCard(cam) {
   const li = document.createElement("li");
@@ -236,18 +261,25 @@ function homeGroup(home, cams) {
     group.classList.toggle("open", open);
     head.setAttribute("aria-expanded", String(open));
     list.hidden = !open;
-    if (open && !list.children.length) list.replaceChildren(...cams.map(camCard));
+    list.classList.toggle("live", liveMode);
+    if (open && !list.children.length) list.replaceChildren(...(liveMode ? liveCards(cams) : cams.map(camCard)));
     if (!open) {
       stopPlayersIn(list);
       list.replaceChildren();
     }
   };
   head.onclick = () => {
+    if (liveMode) {
+      // другой раскрытый дом сворачиваем вместе с его потоками
+      liveHome = liveHome === home ? null : home;
+      renderList();
+      return;
+    }
     const open = !openHomes.has(home);
     open ? openHomes.add(home) : openHomes.delete(home);
     setOpen(open);
   };
-  setOpen(openHomes.has(home));
+  setOpen(liveMode ? liveHome === home : openHomes.has(home));
   const row = document.createElement("div");
   row.className = "home-row";
   row.append(head, refreshButton());
@@ -292,10 +324,10 @@ function renderList() {
   $("#viewer").replaceChildren();
   list.hidden = false;
   $("#back").hidden = true;
-  $("#grid").hidden = info.cameras.length < 2;
-  $("#title").textContent = archiveMode ? "Архив" : "Камеры";
-  $("#mode-archive").hidden = !info.recording;
-  if (archiveMode) $("#grid").hidden = true;
+  $("#grid").hidden = archiveMode || !info.cameras.length;
+  $("#grid").textContent = liveMode ? "Камеры" : "Live";
+  $("#title").textContent = archiveMode ? "Архив" : liveMode ? "Live" : "Камеры";
+  $("#mode-archive").hidden = !info.recording || liveMode;
 }
 
 function anyCardPlaying() {
@@ -363,24 +395,16 @@ function openCameras(cams) {
   $("#cams").hidden = true;
   $("#back").hidden = false;
   $("#grid").hidden = true;
-  $("#title").textContent = cams.length > 1 ? "Сетка" : cams[0].name;
+  $("#title").textContent = cams.length > 1 ? "Live" : cams[0].name;
   if (cams.length === 1) history.replaceState(null, "", `#cam=${cams[0].id}`);
 }
 
 $("#back").onclick = () => { hideArchive(); stopPlayers(); history.replaceState(null, "", location.pathname); renderList(); };
-$("#grid").onclick = () => openCameras(
-  info.cameras.filter((c) => c.online !== false).slice(0, info.max_streams));
-function applyCompatUi() {
-  $("#compat").checked = compat;
-  $("#compat-hint").hidden = !compat;
-}
-$("#compat").onchange = () => {
-  compat = $("#compat").checked;
-  try { localStorage.setItem("sc_compat", compat ? "1" : "0"); } catch {}
-  applyCompatUi();
-  if (!$("#viewer").hidden && currentCams.length) openCameras(currentCams);
+$("#grid").onclick = () => {
+  liveMode = !liveMode;
+  liveHome = null;
+  renderList();
 };
-applyCompatUi();
 
 async function main() {
   try {
@@ -429,7 +453,7 @@ function hideArchive() {
 
 function setArchiveMode(on) {
   archiveMode = on;
-  $("#mode-archive").textContent = on ? "Живое" : "Архив";
+  $("#mode-archive").textContent = on ? "Камеры" : "Архив";
   hideArchive();
   renderList();
   $("#title").textContent = on ? "Архив" : "Камеры";

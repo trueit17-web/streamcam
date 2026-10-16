@@ -43,6 +43,8 @@ main { padding: 0 16px 16px; }
 .cam:fullscreen { display: flex; align-items: center; background: #000; }
 .cam:fullscreen .card-video { height: 100%; aspect-ratio: auto; }
 .cam:fullscreen .caption { display: none; }
+.home-cams.live { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; }
+.live-note { color: var(--muted); font-size: 13px; grid-column: 1 / -1; }
 #viewer.single .player { max-width: 1280px; margin: 0 auto; }
 #viewer.grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .player { background: #000; border-radius: 12px; overflow: hidden; }
@@ -52,8 +54,6 @@ main { padding: 0 16px 16px; }
 .player .bar span { flex: 1; }
 .player:fullscreen video-stream { height: 100%; aspect-ratio: auto; }
 .player:fullscreen .bar { position: absolute; bottom: 0; left: 0; right: 0; opacity: .8; }
-#compat-wrap { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
-#compat-hint { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
 #archive .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 #archive .chips button { background: var(--card); color: var(--fg); }
 #archive .chips button.active { background: var(--accent); color: var(--accent-fg); }

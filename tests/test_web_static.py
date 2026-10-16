@@ -13,11 +13,10 @@ def test_index_and_assets(web):
     assert client.get("/static/style.css").status_code == 200
 
 
-def test_compat_toggle_present(web):
+def test_compat_toggle_removed(web):
     client = TestClient(web.app)
-    assert 'id="compat"' in client.get("/").text
-    js = client.get("/static/app.js").text
-    assert "compat=1" in js and "sc_compat" in js
+    assert 'id="compat"' not in client.get("/").text
+    assert "#compat" not in client.get("/static/app.js").text
 
 
 def test_archive_ui_present(web):
@@ -56,3 +55,10 @@ def test_assets_versioned_by_content(web):
         digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:10]
         assert f'/static/{name}?v={digest}"' in html
     assert not re.search(r'/static/app\.js"', html)
+
+
+def test_live_mode_button(web):
+    client = TestClient(web.app)
+    assert '<button id="grid" hidden>Live</button>' in client.get("/").text
+    js = client.get("/static/app.js").text
+    assert "liveMode" in js and "liveCards" in js
