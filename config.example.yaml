@@ -28,18 +28,28 @@ imou:
   # api_url: https://openapi-fk.easy4ip.com/openapi   # если аккаунт в другом регионе
   refresh_minutes: 10
   snapshot_minutes: 15
-  # home: Город             # дом для всех камер Imou в списке
+  home: Город                # дом для всех камер Imou основного аккаунта (без строки — «Другие камеры»)
   # Камеры другого дома: облако отдаёт видео только по ключам аккаунта, к которому камера привязана,
   # поэтому владелец создаёт своё приложение на open.imoulife.com и даёт его ключи
   # accounts:
   #   - app_id: ${IMOU2_APP_ID:-}
   #     app_secret: ${IMOU2_APP_SECRET:-}
   #     home: Дом мамы
+  #   - app_id: ${IMOU3_APP_ID:-}      # третий аккаунт — так же: ключи в .env, свой дом
+  #     app_secret: ${IMOU3_APP_SECRET:-}
+  #     home: Дача
 
-# Дом для отдельных камер по названию или id (перекрывает дом из Tuya/imou.home/камеры):
-# homes:
-#   Двор у мамы: Дом мамы
-#   imou_ab12cd34: Дача
+# Группы «дом» в списке камер. Откуда берётся дом (сверху — главнее):
+#   1. homes: ниже — по id камеры или по её названию;
+#   2. home: у камеры в cameras / у аккаунта в imou.accounts;
+#   3. imou.home — для камер основного аккаунта Imou;
+#   4. дом из приложения Smart Life/Tuya — для камер Tuya.
+# Камеры без дома попадают в «Другие камеры». id камер облаков: tuya_<device id>, imou_<серийник>
+# (в нижнем регистре) — видны в /api/cameras или в статусе деплоя.
+homes:
+  Двор у мамы: Дом мамы      # по названию, как в приложении
+  imou_ab12cd34: Дача        # по id
+  tuya_bf1234567890abcd: Город
 
 telegram:
   bot_token: ${TELEGRAM_BOT_TOKEN:-}
@@ -68,6 +78,7 @@ cameras:
     host: 192.168.1.31
     did: "111111111"
     model: chuangmi.camera.079ae2
+    home: Город              # дом этой камеры в списке
   - id: c701_room
     name: Комната
     type: xiaomi
@@ -76,6 +87,7 @@ cameras:
     host: 192.168.1.32
     did: "222222222"
     model: chuangmi.camera.079ae2
+    home: Город
   - id: c701_yard
     name: Двор
     type: xiaomi
@@ -84,6 +96,24 @@ cameras:
     host: 192.168.1.33
     did: "333333333"
     model: chuangmi.camera.079ae2
+    home: Город
+    record_subtype: 1        # запись в архив с субпотока (меньше места); 0 — основной поток
+  # Dahua/Imou по локальной сети (RTSP с регистратора или камеры)
+  - id: dacha_gate
+    name: Ворота на даче
+    type: dahua
+    host: 192.168.2.10
+    user: admin
+    password: ${DAHUA_PASSWORD:-}
+    channel: 1
+    subtype: 1               # 0 — основной поток, 1 — субпоток
+    home: Дача
+  # Любой RTSP-источник (или ffmpeg:...): камера у соседа, регистратор и т.п.
+  - id: garage
+    name: Гараж
+    type: rtsp
+    url: rtsp://user:${GARAGE_PASSWORD:-}@192.168.1.50:554/stream1
+    home: Дом мамы
   - id: test
     name: Тестовый поток
     type: rtsp
