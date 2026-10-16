@@ -90,6 +90,23 @@ C701 отдают H.265 — его показывают Safari/iOS и Chrome/Edg
 - Не писать камеру: `record: false` у камеры; не писать Tuya: `recording.tuya: false`.
 - Если запись не идёт больше `alert_minutes`, админам придёт уведомление в Telegram.
 
+## Деплой и мониторинг (GitHub Actions)
+- `deploy` — после каждого слияния в `main` (и вручную) заходит на сервер по SSH, делает
+  `git merge --ff-only origin/main`, пересобирает и перезапускает контейнеры (`deploy/remote-deploy.sh`)
+  и проверяет, что streemcam отвечает на `127.0.0.1:8080`.
+- `status` — раз в час и вручную: контейнеры, ответ streemcam, диск, ошибки в логах (`deploy/remote-status.sh`).
+  При проблеме запуск падает, и GitHub присылает письмо.
+
+Пока секреты не заданы, оба workflow просто пропускаются. Настройка:
+1. Ключ только для деплоя: `ssh-keygen -t ed25519 -N "" -f streamcam_deploy`;
+   `streamcam_deploy.pub` добавить в `~/.ssh/authorized_keys` пользователя сервера, которому принадлежит
+   клон и который входит в группу `docker`.
+2. Клон на сервере должен уметь `git fetch origin` без пароля (публичный репозиторий или deploy key).
+3. GitHub → Settings → Secrets and variables → Actions → New repository secret:
+   `PROD_SSH_HOST`, `PROD_SSH_USER`, `PROD_SSH_KEY` (содержимое `streamcam_deploy`),
+   `PROD_SSH_KNOWN_HOSTS` (вывод `ssh-keyscan -p <порт> <хост>`), `PROD_PATH` (путь к клону),
+   при нестандартном порте — `PROD_SSH_PORT`.
+
 ## Изменение конфигурации
 
 `go2rtc.yaml` генерируется только одноразовым сервисом `go2rtc-config` — go2rtc и streemcam

@@ -1,0 +1,51 @@
+name: status
+
+# Состояние прода: контейнеры, ответ streemcam, диск, ошибки в логах.
+# Раз в час и вручную; при проблеме запуск падает и GitHub присылает письмо.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "За сколько часов показать ошибки в логах"
+        default: "1"
+
+concurrency:
+  group: prod-status
+  cancel-in-progress: true
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HOST: ${{ secrets.PROD_SSH_HOST }}
+      PORT: ${{ secrets.PROD_SSH_PORT || '22' }}
+      USER_NAME: ${{ secrets.PROD_SSH_USER }}
+      DEPLOY_PATH: ${{ secrets.PROD_PATH }}
+      HOURS: ${{ inputs.hours || '1' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ключ SSH
+        id: ssh
+        env:
+          KEY: ${{ secrets.PROD_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$KEY" ] || [ -z "$KNOWN_HOSTS" ] || [ -z "$DEPLOY_PATH" ]; then
+            echo "::notice::Секреты PROD_* не заданы — проверка пропущена"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_prod && chmod 600 ~/.ssh/id_prod
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Состояние
+        if: steps.ssh.outputs.skip != 'true'
+        run: |
+          case "$HOURS" in ''|*[!0-9]*) echo "hours должно быть числом" >&2; exit 1;; esac
+          ssh -i ~/.ssh/id_prod -p "$PORT" -o StrictHostKeyChecking=yes "$USER_NAME@$HOST" \
+            "bash -s -- '$DEPLOY_PATH' '$HOURS'" < deploy/remote-status.sh
