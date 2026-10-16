@@ -77,7 +77,7 @@ def test_homes(base_data):
     base_data["cameras"][0]["home"] = "Дача"
     base_data["imou"] = {"enabled": True, "app_id": "a", "app_secret": "s", "home": "Город"}
     base_data["internal_key"] = "k" * 16
-    base_data["homes"] = {"gate": "Офис", "imou_sh1": "Мама", "tuya_bf2": "Гараж"}
+    base_data["homes"] = {"gate": "Офис", "Двор мамы": "Мама", "tuya_bf2": "Гараж", "Ю": "не выиграет у id"}
     c = Catalog(parse_config(base_data))
     c.set_tuya([TuyaCamera("bf1", "Я", True, home="Мой дом"), TuyaCamera("bf2", "Ю", True, home="Мой дом")])
     c.set_imou([ImouCamera("AB12CD", "Улица", True), ImouCamera("SH1", "Двор мамы", True)])

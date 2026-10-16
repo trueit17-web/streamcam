@@ -189,7 +189,7 @@ class Config(BaseModel):
     admins: UserLists = UserLists()
     allow: UserLists = UserLists()
     cameras: list[Camera]
-    homes: dict[str, str] = {}  # дом для конкретной камеры по её id (перекрывает home провайдера)
+    homes: dict[str, str] = {}  # дом камеры по id или названию (перекрывает home провайдера)
 
     @field_validator("public_url")
     @classmethod
