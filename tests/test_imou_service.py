@@ -16,6 +16,9 @@ class FakeClient:
         return self.cams
 
     async def stream_url(self, device_id):
+        self.stream_calls = getattr(self, "stream_calls", 0) + 1
+        if self.fail:
+            raise self.fail
         return f"https://h/{device_id}.m3u8"
 
 
@@ -88,3 +91,23 @@ async def test_refresh_without_alert_callback(cfg):
 async def test_stream_url_delegates(env):
     svc, *_ = env
     assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
+
+
+async def test_stream_url_cached_including_errors(cfg):
+    from streemcam.imou.service import STREAM_CACHE_SECONDS
+    t = [0.0]
+    client = FakeClient()
+    svc = ImouService(cfg, Catalog(cfg), client, clock=lambda: t[0])
+    assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
+    assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
+    assert client.stream_calls == 1
+    t[0] = STREAM_CACHE_SECONDS
+    client.fail = ImouError("OP1009 No right")
+    for _ in range(3):
+        with pytest.raises(ImouError):
+            await svc.stream_url("AB12CD")
+    assert client.stream_calls == 2
+    t[0] = 2 * STREAM_CACHE_SECONDS
+    client.fail = None
+    assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
+    assert client.stream_calls == 3
