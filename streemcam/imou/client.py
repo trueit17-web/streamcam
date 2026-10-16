@@ -16,6 +16,8 @@ LIVE_MISSING = "LV1002"
 LIVE_EXISTS = "LV1001"
 ONLINE_STATES = ("1", "4")  # 4 — камера спит, но просыпается по запросу потока
 PAGE_LIMIT = 50
+SHARE_PAGE = 100   # queryRange shareDeviceList: не больше 100 записей за раз
+SHARE_MAX_PAGES = 5
 
 
 class _ApiError(ImouError):
@@ -102,14 +104,36 @@ class ImouClient:
         ids = [d["deviceId"] for d in data.get("deviceList") or [] if d.get("deviceId")]
         if len(ids) >= PAGE_LIMIT:
             log.warning("imou: %d devices returned, only the first %d are supported", len(ids), PAGE_LIMIT)
-        if not ids:
-            return []
-        detail = await self._call("deviceBaseDetailList",
-                                  {"deviceList": [{"deviceId": d, "channelList": "0"} for d in ids]})
-        names = {d.get("deviceId"): d.get("name") for d in detail.get("deviceList") or []}
         cams = []
-        for device_id in ids:
-            cams.append(ImouCamera(device_id, names.get(device_id) or device_id, await self._online(device_id)))
+        if ids:
+            detail = await self._call("deviceBaseDetailList",
+                                      {"deviceList": [{"deviceId": d, "channelList": "0"} for d in ids]})
+            names = {d.get("deviceId"): d.get("name") for d in detail.get("deviceList") or []}
+            for device_id in ids:
+                cams.append(ImouCamera(device_id, names.get(device_id) or device_id, await self._online(device_id)))
+        # камеры, которыми поделились в приложении Imou Life, deviceBaseList не отдаёт
+        shared = [c for c in await self._shared_cameras() if c.device_id not in ids]
+        log.info("imou: %d own cameras, %d shared from the app", len(cams), len(shared))
+        return cams + shared
+
+    async def _shared_cameras(self) -> list[ImouCamera]:
+        cams: list[ImouCamera] = []
+        for page in range(SHARE_MAX_PAGES):
+            start = page * SHARE_PAGE + 1
+            try:
+                data = await self._call("shareDeviceList", {"queryRange": f"{start}-{start + SHARE_PAGE - 1}"})
+            except ImouAuthError:
+                raise
+            except ImouError as e:
+                log.warning("imou shared devices failed: %s", e)
+                break
+            devices = data.get("deviceList") or []
+            for d in devices:
+                if d.get("deviceId"):
+                    cams.append(ImouCamera(d["deviceId"], d.get("name") or d["deviceId"],
+                                           str(d.get("status")) == "1"))
+            if len(devices) < SHARE_PAGE:
+                break
         return cams
 
     async def _online(self, device_id: str) -> bool:
