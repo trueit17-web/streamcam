@@ -13,9 +13,10 @@ git merge --ff-only origin/main
 echo "== стало: $(git rev-parse --short HEAD)"
 
 docker compose build go2rtc-config streemcam
-# сначала проверяем config.yaml и .env, не трогая работающие контейнеры
-if ! docker compose run --rm --no-deps go2rtc-config \
-    python -m streemcam render-go2rtc --out /tmp/go2rtc-check.yaml; then
+# сначала проверяем config.yaml и .env, не трогая работающие контейнеры.
+# </dev/null обязателен: скрипт приходит в bash через stdin, и run иначе съест его остаток
+if ! docker compose run --rm -T --no-deps go2rtc-config \
+    python -m streemcam render-go2rtc --out /tmp/go2rtc-check.yaml </dev/null; then
   echo "!! config.yaml или .env с ошибкой (см. выше), работающие контейнеры не тронуты" >&2
   exit 1
 fi
