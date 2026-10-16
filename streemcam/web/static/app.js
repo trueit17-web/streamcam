@@ -197,6 +197,8 @@ function camCard(cam) {
   li.append(img, caption);
   li.onclick = () => {
     if (archiveMode) { openArchive(cam); return; }
+    // офлайн-камеру не запускаем: сервер её всё равно не отдаст, а облачную это зря будит
+    if (li.classList.contains("offline")) return;
     playInlineCard(li, cam);
   };
   return li;
@@ -246,8 +248,38 @@ function homeGroup(home, cams) {
     setOpen(open);
   };
   setOpen(openHomes.has(home));
-  group.append(head, list);
+  const row = document.createElement("div");
+  row.className = "home-row";
+  row.append(head, refreshButton());
+  group.append(row, list);
   return group;
+}
+
+// Статус камер приходит из облаков раз в несколько минут; кнопка в доме спрашивает их сразу.
+function refreshButton() {
+  const button = document.createElement("button");
+  button.className = "home-refresh";
+  button.textContent = "↻";
+  button.title = "Обновить онлайн";
+  button.setAttribute("aria-label", "Обновить онлайн");
+  button.onclick = async () => {
+    for (const b of document.querySelectorAll(".home-refresh")) b.disabled = true;
+    button.classList.add("busy");
+    try {
+      const r = await api("/api/cameras/refresh", { method: "POST" });
+      if (r.ok) info = await r.json();
+    } catch {
+      // сеть пропала — оставляем прежний статус
+    }
+    if (anyCardPlaying()) {
+      updateCardStatuses();
+      for (const b of document.querySelectorAll(".home-refresh")) b.disabled = false;
+      button.classList.remove("busy");
+    } else {
+      renderList();
+    }
+  };
+  return button;
 }
 
 function renderList() {
@@ -336,7 +368,8 @@ function openCameras(cams) {
 }
 
 $("#back").onclick = () => { hideArchive(); stopPlayers(); history.replaceState(null, "", location.pathname); renderList(); };
-$("#grid").onclick = () => openCameras(info.cameras.slice(0, info.max_streams));
+$("#grid").onclick = () => openCameras(
+  info.cameras.filter((c) => c.online !== false).slice(0, info.max_streams));
 function applyCompatUi() {
   $("#compat").checked = compat;
   $("#compat-hint").hidden = !compat;

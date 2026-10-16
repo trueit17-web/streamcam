@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import time
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -113,13 +114,19 @@ class LinkIn(BaseModel):
     t: str
 
 
+REFRESH_MIN_SECONDS = 30
+
+
 def _denied(ident: Identity) -> JSONResponse:
     return JSONResponse({"error": "not_allowed", "user_id": ident.user_id}, status_code=403)
 
 
 def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry: StreamRegistry,
-               http: httpx.AsyncClient, upstream_connect=None, archive: Archive | None = None) -> FastAPI:
+               http: httpx.AsyncClient, upstream_connect=None, archive: Archive | None = None,
+               refresh_status=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    refresh_lock = asyncio.Lock()
+    last_refresh: list[float] = []
     upstream_connect = upstream_connect or default_upstream(cfg.go2rtc_url)
     transcodes = TranscodeLimiter(cfg.max_transcodes)
 
@@ -157,8 +164,7 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
             return _denied(e.identity)
         return {"token": access.issue_session(ident)}
 
-    @app.get("/api/cameras")
-    async def cameras(user: Identity = Depends(current_user)):
+    def cameras_payload() -> dict:
         return {
             "player_mode": cfg.player_mode,
             "max_streams": cfg.max_streams_per_user,
@@ -168,6 +174,21 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
                          "home": c.home}
                         for c in catalog.all()],
         }
+
+    @app.get("/api/cameras")
+    async def cameras(user: Identity = Depends(current_user)):
+        return cameras_payload()
+
+    @app.post("/api/cameras/refresh")
+    async def cameras_refresh(user: Identity = Depends(current_user)):
+        """Кнопка «обновить» в доме: заново спросить облака о статусе камер (не чаще раза в REFRESH_MIN_SECONDS)."""
+        if refresh_status is not None:
+            async with refresh_lock:
+                now = time.monotonic()
+                if not last_refresh or now - last_refresh[0] >= REFRESH_MIN_SECONDS:
+                    last_refresh[:] = [now]
+                    await refresh_status()
+        return cameras_payload()
 
     @app.get("/api/snapshot/{cam_id}")
     async def snapshot(cam_id: str, user: Identity = Depends(current_user)):
@@ -237,6 +258,9 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
         cam = catalog.get(src)
         if cam is None:
             await ws.close(code=4404)
+            return
+        if monitor.is_online(src) is False:
+            await ws.close(code=4410)  # офлайн-камеру не будим: облако и go2rtc не дёргаем
             return
         if compat:
             upstream_name = compat_name(src)
