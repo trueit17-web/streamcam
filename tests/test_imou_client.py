@@ -47,7 +47,8 @@ NO_SHARED = ok({"count": 0, "deviceList": []})
 
 
 def make(responses):
-    responses = {"shareDeviceList": [NO_SHARED], **responses}
+    # по умолчанию облачный RTSP недоступен, и stream_url идёт старым путём через HLS
+    responses = {"shareDeviceList": [NO_SHARED], "getStreamUrl": [err("LV1003", "not supported")], **responses}
     cloud = FakeCloud(responses)
     http = httpx.AsyncClient(transport=httpx.MockTransport(cloud.handler))
     client = ImouClient("APP", "SECRET", API, http, clock=lambda: 1700000000, nonce=lambda: "n1")
@@ -285,4 +286,24 @@ async def test_stream_url_none_raises():
 async def test_stream_url_other_error_raises():
     client, _ = make({"accessToken": [TOKEN], "getLiveStreamInfo": [err("DV1007")]})
     with pytest.raises(ImouError):
+        await client.stream_url("AB12CD")
+
+
+async def test_stream_url_prefers_cloud_rtsp():
+    client, cloud = make({"accessToken": [TOKEN],
+                          "getStreamUrl": [ok({"url": "rtsp://cloud.example/live/AB12CD?token=x"})]})
+    assert await client.stream_url("AB12CD") == "rtsp://cloud.example/live/AB12CD?token=x"
+    assert cloud.methods() == ["accessToken", "getStreamUrl"]
+    assert cloud.calls[-1][1]["params"] == {"deviceId": "AB12CD", "channelId": "0", "streamId": 0, "token": "T1"}
+
+
+async def test_stream_url_rtsp_without_url_falls_back_to_hls():
+    client, _ = make({"accessToken": [TOKEN], "getStreamUrl": [ok({})],
+                      "getLiveStreamInfo": [live(stream(0, "https://h/0.m3u8"))]})
+    assert await client.stream_url("AB12CD") == "https://h/0.m3u8"
+
+
+async def test_stream_url_rtsp_auth_error_propagates():
+    client, _ = make({"accessToken": [TOKEN], "getStreamUrl": [err("OP1009")]})
+    with pytest.raises(ImouAuthError):
         await client.stream_url("AB12CD")

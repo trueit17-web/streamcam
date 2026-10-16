@@ -28,6 +28,10 @@ function stopPlayers() {
   }
 }
 
+function stopPlayersIn(root) {
+  for (const el of root.querySelectorAll("video-stream")) el.ondisconnect?.();
+}
+
 // VideoRTC creates its internal <video> element when it is connected to the
 // document; that can happen a tick after we set .src, so try immediately and
 // again on the next frame.
@@ -174,27 +178,83 @@ function playInlineCard(li, cam) {
   muteWhenReady(video);
 }
 
+const NO_HOME = "Другие камеры";
+// Раскрытые дома живут только в памяти: по умолчанию все свёрнуты,
+// но периодическая перерисовка списка не должна их сворачивать.
+const openHomes = new Set();
+
+function camCard(cam) {
+  const li = document.createElement("li");
+  li.className = "cam";
+  li.dataset.camId = cam.id;
+  if (cam.online === false) li.classList.add("offline");
+  const img = cardSnapshotImg(cam);
+  const caption = document.createElement("div");
+  caption.className = "caption";
+  caption.innerHTML = `<b></b><span class="status"></span>`;
+  caption.querySelector("b").textContent = cam.name;
+  caption.querySelector(".status").textContent = statusText(cam.online);
+  li.append(img, caption);
+  li.onclick = () => {
+    if (archiveMode) { openArchive(cam); return; }
+    playInlineCard(li, cam);
+  };
+  return li;
+}
+
+function homeGroups(cameras) {
+  const groups = new Map();
+  for (const cam of cameras) {
+    const home = cam.home || NO_HOME;
+    if (!groups.has(home)) groups.set(home, []);
+    groups.get(home).push(cam);
+  }
+  // дома по алфавиту, камеры без дома — в конце
+  return new Map([...groups].sort(([a], [b]) =>
+    (a === NO_HOME) - (b === NO_HOME) || a.localeCompare(b, "ru")));
+}
+
+function homeSummary(cams) {
+  const offline = cams.filter((c) => c.online === false).length;
+  return offline ? `${cams.length} · ${offline} офлайн` : String(cams.length);
+}
+
+function homeGroup(home, cams) {
+  const group = document.createElement("li");
+  group.className = "home";
+  const head = document.createElement("button");
+  head.className = "home-head";
+  head.innerHTML = `<span class="home-name"></span><span class="home-count"></span>`;
+  head.querySelector(".home-name").textContent = home;
+  head.querySelector(".home-count").textContent = homeSummary(cams);
+  const list = document.createElement("ul");
+  list.className = "home-cams";
+  // карточки (и их снимки) создаются только при раскрытии дома
+  const setOpen = (open) => {
+    group.classList.toggle("open", open);
+    head.setAttribute("aria-expanded", String(open));
+    list.hidden = !open;
+    if (open && !list.children.length) list.replaceChildren(...cams.map(camCard));
+    if (!open) {
+      stopPlayersIn(list);
+      list.replaceChildren();
+    }
+  };
+  head.onclick = () => {
+    const open = !openHomes.has(home);
+    open ? openHomes.add(home) : openHomes.delete(home);
+    setOpen(open);
+  };
+  setOpen(openHomes.has(home));
+  group.append(head, list);
+  return group;
+}
+
 function renderList() {
   stopPlayers();
   const list = $("#cams");
-  list.replaceChildren(...info.cameras.map((cam) => {
-    const li = document.createElement("li");
-    li.className = "cam";
-    li.dataset.camId = cam.id;
-    if (cam.online === false) li.classList.add("offline");
-    const img = cardSnapshotImg(cam);
-    const caption = document.createElement("div");
-    caption.className = "caption";
-    caption.innerHTML = `<b></b><span class="status"></span>`;
-    caption.querySelector("b").textContent = cam.name;
-    caption.querySelector(".status").textContent = statusText(cam.online);
-    li.append(img, caption);
-    li.onclick = () => {
-      if (archiveMode) { openArchive(cam); return; }
-      playInlineCard(li, cam);
-    };
-    return li;
-  }));
+  const groups = homeGroups(info.cameras);
+  list.replaceChildren(...[...groups].map(([home, cams]) => homeGroup(home, cams)));
   $("#message").hidden = true;
   $("#viewer").hidden = true;
   $("#viewer").replaceChildren();
@@ -213,7 +273,7 @@ function anyCardPlaying() {
 // Периодическое обновление без перерисовки: только статус/офлайн-класс и
 // снимок неиграющих карточек — перерисовка убила бы активные inline-плееры.
 function updateCardStatuses() {
-  for (const li of $("#cams").children) {
+  for (const li of $("#cams").querySelectorAll("li.cam")) {
     const cam = info.cameras.find((c) => c.id === li.dataset.camId);
     if (!cam) continue;
     li.classList.toggle("offline", cam.online === false);

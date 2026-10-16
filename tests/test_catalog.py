@@ -70,3 +70,20 @@ def test_loaded_flags(make_cfg):
 def test_disabled_providers_count_as_loaded(cfg):
     c = Catalog(cfg)
     assert (c.tuya_loaded, c.imou_loaded) == (True, True)
+
+
+def test_homes(base_data):
+    from streemcam.config import parse_config
+    base_data["cameras"][0]["home"] = "Дача"
+    base_data["imou"] = {"enabled": True, "app_id": "a", "app_secret": "s", "home": "Город"}
+    base_data["internal_key"] = "k" * 16
+    base_data["homes"] = {"gate": "Офис", "imou_sh1": "Мама", "tuya_bf2": "Гараж"}
+    c = Catalog(parse_config(base_data))
+    c.set_tuya([TuyaCamera("bf1", "Я", True, home="Мой дом"), TuyaCamera("bf2", "Ю", True, home="Мой дом")])
+    c.set_imou([ImouCamera("AB12CD", "Улица", True), ImouCamera("SH1", "Двор мамы", True)])
+    assert [(x.id, x.home) for x in c.all()] == [
+        ("yard", "Дача"), ("gate", "Офис"), ("room", None), ("tuya_bf2", "Гараж"), ("tuya_bf1", "Мой дом"),
+        ("imou_sh1", "Мама"), ("imou_ab12cd", "Город")]
+    c.mark_tuya_offline()
+    c.mark_imou_offline()
+    assert (c.get("tuya_bf1").home, c.get("imou_ab12cd").home) == ("Мой дом", "Город")

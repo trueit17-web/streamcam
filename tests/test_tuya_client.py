@@ -17,14 +17,19 @@ class FakeManager:
         self.fail = None
         self.url = "rtsps://tuya.example/stream?sig=1"
 
-    def update_device_cache(self):
+        self.homes = [SimpleNamespace(id="h1", name="Мой дом"), SimpleNamespace(id="h2", name="Дача")]
+        self.by_home = {
+            "h1": [SimpleNamespace(id="bf1", name="Прихожая", category="sp", online=True),
+                   SimpleNamespace(id="bf2", name="Розетка", category="cz", online=True)],
+            "h2": [SimpleNamespace(id="bf3", name="Гараж", category="sp", online=False)],
+        }
+        self.home_repository = SimpleNamespace(query_homes=self._query_homes)
+        self.device_repository = SimpleNamespace(query_devices_by_home=lambda home_id: self.by_home[home_id])
+
+    def _query_homes(self):
         if self.fail:
             raise Exception(self.fail)
-        self.device_map = {
-            "bf1": SimpleNamespace(id="bf1", name="Прихожая", category="sp", online=True),
-            "bf2": SimpleNamespace(id="bf2", name="Розетка", category="cz", online=True),
-            "bf3": SimpleNamespace(id="bf3", name="Гараж", category="sp", online=False),
-        }
+        return self.homes
 
     def get_device_stream_allocate(self, device_id, stream_type):
         if self.fail:
@@ -47,7 +52,9 @@ def test_from_credentials_builds_manager_with_listener():
 def test_list_cameras_filters_category():
     assert CAMERA_CATEGORY == "sp"
     client = TuyaClient(FakeManager())
-    assert client.list_cameras() == [TuyaCamera("bf1", "Прихожая", True), TuyaCamera("bf3", "Гараж", False)]
+    assert client.list_cameras() == [TuyaCamera("bf1", "Прихожая", True, "Мой дом"),
+                                     TuyaCamera("bf3", "Гараж", False, "Дача")]
+    assert set(client._manager.device_map) == {"bf1", "bf2", "bf3"}
 
 
 def test_list_cameras_error():

@@ -159,7 +159,22 @@ class ImouClient:
                 return hls
         return None
 
+    async def _cloud_rtsp(self, device_id: str) -> str | None:
+        # getStreamUrl работает и для камер, которыми поделились; HLS для них недоступен
+        try:
+            data = await self._call("getStreamUrl", {"deviceId": device_id, "channelId": "0", "streamId": 0})
+        except ImouAuthError:
+            raise
+        except ImouError as e:
+            log.info("imou cloud rtsp for %s unavailable, using hls: %s", device_id, e)
+            return None
+        url = data.get("url") or ""
+        return url if url.startswith(("rtsp://", "rtsps://")) else None
+
     async def stream_url(self, device_id: str) -> str:
+        url = await self._cloud_rtsp(device_id)
+        if url:
+            return url
         url = await self._live_hls(device_id)
         if url:
             return url

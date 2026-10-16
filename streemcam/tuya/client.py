@@ -29,12 +29,19 @@ class TuyaClient:
         return cls(manager)
 
     def list_cameras(self) -> list[TuyaCamera]:
+        # как Manager.update_device_cache, но запоминаем, в каком доме каждое устройство
+        m = self._manager
+        homes: dict[str, str] = {}
         try:
-            self._manager.update_device_cache()
+            m.device_map.clear()
+            for home in m.home_repository.query_homes():
+                for d in m.device_repository.query_devices_by_home(home.id):
+                    m.device_map[d.id] = d
+                    homes[d.id] = home.name
         except Exception as e:
             raise TuyaError(str(e)) from e
-        return [TuyaCamera(d.id, d.name, bool(d.online))
-                for d in self._manager.device_map.values() if d.category == CAMERA_CATEGORY]
+        return [TuyaCamera(d.id, d.name, bool(d.online), homes.get(d.id))
+                for d in m.device_map.values() if d.category == CAMERA_CATEGORY]
 
     def allocate_rtsp(self, device_id: str) -> str:
         try:

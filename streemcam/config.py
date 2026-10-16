@@ -21,6 +21,7 @@ class RtspCamera(BaseModel):
     type: Literal["rtsp"]
     id: str = Field(pattern=CAMERA_ID)
     name: str
+    home: str | None = None  # группа «дом» в списке камер
     url: str  # любой источник go2rtc: rtsp://, ffmpeg:..., и т.д.
     record: bool = True
 
@@ -29,6 +30,7 @@ class DahuaCamera(BaseModel):
     type: Literal["dahua"]
     id: str = Field(pattern=CAMERA_ID)
     name: str
+    home: str | None = None  # группа «дом» в списке камер
     host: str
     port: int = 554
     user: str
@@ -42,6 +44,7 @@ class XiaomiCamera(BaseModel):
     type: Literal["xiaomi"]
     id: str = Field(pattern=CAMERA_ID)
     name: str
+    home: str | None = None  # группа «дом» в списке камер
     account: str
     region: str
     host: str
@@ -94,6 +97,7 @@ class ImouConfig(BaseModel):
     api_url: str = "https://openapi.easy4ip.com/openapi"
     refresh_minutes: int = 10
     snapshot_minutes: int = 15
+    home: str | None = None  # группа «дом» для всех камер Imou
 
     @field_validator("app_id", "app_secret", mode="before")
     @classmethod
@@ -185,6 +189,7 @@ class Config(BaseModel):
     admins: UserLists = UserLists()
     allow: UserLists = UserLists()
     cameras: list[Camera]
+    homes: dict[str, str] = {}  # дом для конкретной камеры по её id (перекрывает home провайдера)
 
     @field_validator("public_url")
     @classmethod
