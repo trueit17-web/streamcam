@@ -118,6 +118,23 @@ def test_build_imou_enabled(make_cfg):
     assert svc.client.api_url == "https://openapi-fk.easy4ip.com/openapi"
 
 
+def test_build_imou_extra_accounts(make_cfg):
+    from streemcam.imou.multi import MultiImouClient
+    c = make_cfg(imou={"enabled": True, "app_id": "APP", "app_secret": "SECRET", "accounts": [
+        {"app_id": "", "app_secret": ""},  # ключи владельца ещё не заданы в .env
+        {"app_id": "APP2", "app_secret": "S2", "home": "Дача"}]}, internal_key="k" * 20)
+    client = build_imou(c, Catalog(c), sync=None, on_alert=None).client
+    assert isinstance(client, MultiImouClient)
+    assert [home for _, home in client._accounts] == [None, "Дача"]
+    assert client._accounts[1][0].api_url == "https://openapi.easy4ip.com/openapi"
+
+
+def test_build_imou_accounts_without_keys_are_ignored(make_cfg):
+    c = make_cfg(imou={"enabled": True, "app_id": "APP", "app_secret": "SECRET",
+                       "accounts": [{"app_id": "", "app_secret": ""}]}, internal_key="k" * 20)
+    assert not hasattr(build_imou(c, Catalog(c), sync=None, on_alert=None).client, "_accounts")
+
+
 def test_needs_internal_api(make_cfg):
     key = {"internal_key": "k" * 20}
     assert needs_internal_api(make_cfg()) is False
