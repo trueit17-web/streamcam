@@ -20,7 +20,7 @@ jobs:
       USER_NAME: ${{ secrets.PROD_SSH_USER }}
       DEPLOY_PATH: ${{ secrets.PROD_PATH }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Ключ SSH
         id: ssh
@@ -28,8 +28,14 @@ jobs:
           KEY: ${{ secrets.PROD_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
         run: |
-          if [ -z "$HOST" ] || [ -z "$KEY" ] || [ -z "$KNOWN_HOSTS" ] || [ -z "$DEPLOY_PATH" ]; then
-            echo "::notice::Секреты PROD_* не заданы — деплой пропущен"
+          missing=""
+          [ -n "$HOST" ] || missing="$missing PROD_SSH_HOST"
+          [ -n "$USER_NAME" ] || missing="$missing PROD_SSH_USER"
+          [ -n "$KEY" ] || missing="$missing PROD_SSH_KEY"
+          [ -n "$KNOWN_HOSTS" ] || missing="$missing PROD_SSH_KNOWN_HOSTS"
+          [ -n "$DEPLOY_PATH" ] || missing="$missing PROD_PATH"
+          if [ -n "$missing" ]; then
+            echo "::warning::Не заданы секреты:$missing — деплой пропущен"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
