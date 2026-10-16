@@ -43,7 +43,11 @@ class FakeCloud:
         return [m for m, _ in self.calls]
 
 
+NO_SHARED = ok({"count": 0, "deviceList": []})
+
+
 def make(responses):
+    responses = {"shareDeviceList": [NO_SHARED], **responses}
     cloud = FakeCloud(responses)
     http = httpx.AsyncClient(transport=httpx.MockTransport(cloud.handler))
     client = ImouClient("APP", "SECRET", API, http, clock=lambda: 1700000000, nonce=lambda: "n1")
@@ -53,7 +57,7 @@ def make(responses):
 async def test_sign_and_body():
     client, cloud = make({"accessToken": [TOKEN], "deviceBaseList": [ok({"deviceList": []})]})
     assert await client.list_cameras() == []
-    (m1, b1), (m2, b2) = cloud.calls
+    (m1, b1), (m2, b2) = cloud.calls[:2]
     assert m1 == "accessToken"
     sign = hashlib.md5(b"time:1700000000,nonce:n1,appSecret:SECRET").hexdigest()
     assert b1["system"] == {"ver": "1.0", "sign": sign, "appId": "APP", "time": 1700000000, "nonce": "n1"}
@@ -76,8 +80,8 @@ async def test_tk1002_relogin_once():
     client, cloud = make({"accessToken": [TOKEN, ok({"accessToken": "T2"})],
                           "deviceBaseList": [err("TK1002"), ok({"deviceList": []})]})
     assert await client.list_cameras() == []
-    assert cloud.methods() == ["accessToken", "deviceBaseList", "accessToken", "deviceBaseList"]
-    assert cloud.calls[-1][1]["params"]["token"] == "T2"
+    assert cloud.methods() == ["accessToken", "deviceBaseList", "accessToken", "deviceBaseList", "shareDeviceList"]
+    assert cloud.calls[3][1]["params"]["token"] == "T2"
 
 
 async def test_tk1002_twice_raises():
@@ -165,7 +169,68 @@ async def test_list_cameras_online_auth_error_propagates():
 async def test_list_cameras_empty():
     client, cloud = make({"accessToken": [TOKEN], "deviceBaseList": [ok({"count": 0, "deviceList": []})]})
     assert await client.list_cameras() == []
-    assert cloud.methods() == ["accessToken", "deviceBaseList"]
+    assert cloud.methods() == ["accessToken", "deviceBaseList", "shareDeviceList"]
+
+
+def shared(device_id, name="", status=1):
+    return {"deviceId": device_id, "name": name, "status": status, "ownerUsername": "x@y",
+            "channels": [{"channelId": "0", "channelOnline": status == 1}]}
+
+
+async def test_list_cameras_adds_shared_from_app():
+    client, cloud = make({
+        "accessToken": [TOKEN],
+        "deviceBaseList": [ok({"deviceList": [{"deviceId": "AB12CD"}]})],
+        "deviceBaseDetailList": [ok({"deviceList": [{"deviceId": "AB12CD", "name": "Улица"}]})],
+        "deviceOnline": [ok({"onLine": "1"})],
+        "shareDeviceList": [ok({"count": 3, "deviceList": [
+            shared("AB12CD", "дубль"), shared("SH1", "Дача"), shared("SH2", status=0)]})],
+    })
+    assert await client.list_cameras() == [
+        ImouCamera("AB12CD", "Улица", True),
+        ImouCamera("SH1", "Дача", True),
+        ImouCamera("SH2", "SH2", False),
+    ]
+    share = next(b for m, b in cloud.calls if m == "shareDeviceList")
+    assert share["params"] == {"queryRange": "1-100", "token": "T1"}
+
+
+async def test_list_cameras_only_shared():
+    client, cloud = make({
+        "accessToken": [TOKEN],
+        "deviceBaseList": [ok({"deviceList": []})],
+        "shareDeviceList": [ok({"count": 1, "deviceList": [shared("SH1", "Дача")]})],
+    })
+    assert await client.list_cameras() == [ImouCamera("SH1", "Дача", True)]
+
+
+async def test_shared_list_pages():
+    first = ok({"count": 101, "deviceList": [shared(f"S{i}") for i in range(100)]})
+    second = ok({"count": 101, "deviceList": [shared("S100")]})
+    client, cloud = make({"accessToken": [TOKEN], "deviceBaseList": [ok({"deviceList": []})],
+                          "shareDeviceList": [first, second]})
+    cams = await client.list_cameras()
+    assert len(cams) == 101
+    ranges = [b["params"]["queryRange"] for m, b in cloud.calls if m == "shareDeviceList"]
+    assert ranges == ["1-100", "101-200"]
+
+
+async def test_shared_list_error_keeps_own_cameras():
+    client, _ = make({
+        "accessToken": [TOKEN],
+        "deviceBaseList": [ok({"deviceList": [{"deviceId": "AB12CD"}]})],
+        "deviceBaseDetailList": [ok({"deviceList": [{"deviceId": "AB12CD", "name": "Улица"}]})],
+        "deviceOnline": [ok({"onLine": "1"})],
+        "shareDeviceList": [err("OP1011", "no permission")],
+    })
+    assert await client.list_cameras() == [ImouCamera("AB12CD", "Улица", True)]
+
+
+async def test_shared_list_auth_error_propagates():
+    client, _ = make({"accessToken": [TOKEN], "deviceBaseList": [ok({"deviceList": []})],
+                      "shareDeviceList": [err("OP1009")]})
+    with pytest.raises(ImouAuthError):
+        await client.list_cameras()
 
 
 def live(*streams):
