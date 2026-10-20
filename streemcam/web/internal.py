@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 
 from ..catalog import Catalog
+from ..go2rtc_config import IMOU_HLS_INPUT
 from ..imou.models import ImouError
 from ..tuya.models import TuyaError
 
@@ -47,6 +48,8 @@ def create_internal_app(catalog: Catalog, tuya, internal_key: str | None, imou=N
         except ImouError as e:
             log.warning("imou stream url for %s failed: %s", device_id, e)
             return PlainTextResponse("imou cloud error", status_code=502)
-        return PlainTextResponse(f"ffmpeg:{url}#video=copy#audio=aac")
+        # HLS читаем в реальном темпе (шаблон IMOU_HLS_INPUT в go2rtc.yaml), облачный RTSP — как есть
+        input_arg = f"#input={IMOU_HLS_INPUT}" if url.startswith("https://") else ""
+        return PlainTextResponse(f"ffmpeg:{url}{input_arg}#video=copy#audio=aac")
 
     return app

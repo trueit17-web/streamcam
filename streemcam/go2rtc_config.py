@@ -11,6 +11,10 @@ COMPAT_SUFFIX = "~h264"
 REC_SUFFIX = "~rec"
 LIVE_SUFFIX = "~live"
 TUYA_AUDIO_FILTER = "highpass=f=120,lowpass=f=3400,aresample=48000"
+# Imou отдаёт живой HLS сегментами по ~4 с. Без -re ffmpeg выкачивает сегмент разом и замолкает
+# до следующего — плеер в браузере получает видео рывками и подвисает. -re отдаёт кадры в реальном темпе.
+IMOU_HLS_INPUT = "imou_hls"
+FFMPEG_TEMPLATES = {IMOU_HLS_INPUT: "-re -fflags nobuffer -flags low_delay -i {input}"}
 
 
 def compat_name(cam_id: str) -> str:
@@ -81,6 +85,7 @@ def render(cfg: Config, existing: dict | None) -> dict:
     data["api"] = {**(data.get("api") or {}), "listen": cfg.go2rtc_api_listen}
     data["webrtc"] = {**(data.get("webrtc") or {}), "listen": cfg.webrtc_listen}
     data["rtsp"] = {**(data.get("rtsp") or {}), "listen": ":8554"}
+    data["ffmpeg"] = {**(data.get("ffmpeg") or {}), **FFMPEG_TEMPLATES}
     return data
 
 
