@@ -85,7 +85,7 @@ def test_imou_ok(cfg):
     client, imou = make_imou(cfg)
     r = client.get(f"/imou/AB12CD?key={KEY}")
     assert r.status_code == 200
-    assert r.text == "ffmpeg:https://h/AB12CD.m3u8#video=copy#audio=aac"
+    assert r.text == "ffmpeg:https://h/AB12CD.m3u8#input=imou_hls#video=copy#audio=aac"
     assert r.headers["content-type"].startswith("text/plain")
     assert imou.asked == ["AB12CD"]
 
@@ -131,3 +131,12 @@ def test_offline_cameras_not_asked(cfg):
     assert client.get(f"/imou/AB12CD?key={KEY}").status_code == 503
     assert client.get(f"/tuya/bf1?key={KEY}").status_code == 503
     assert imou.asked == []
+
+
+def test_imou_cloud_rtsp_without_hls_input(cfg):
+    class RtspImou(FakeImou):
+        async def stream_url(self, device_id):
+            return f"rtsp://cloud/{device_id}"
+    client, _ = make_imou(cfg, imou=RtspImou())
+    r = client.get(f"/imou/AB12CD?key={KEY}")
+    assert r.text == "ffmpeg:rtsp://cloud/AB12CD#video=copy#audio=aac"

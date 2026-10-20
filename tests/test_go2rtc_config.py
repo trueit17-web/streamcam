@@ -51,6 +51,7 @@ def test_render_sets_streams_and_listen(cfg):
     assert data["api"]["listen"] == "127.0.0.1:1984"
     assert data["webrtc"]["listen"] == ":8555"
     assert data["rtsp"]["listen"] == ":8554"
+    assert data["ffmpeg"]["imou_hls"].startswith("-re ") and "{input}" in data["ffmpeg"]["imou_hls"]
 
 
 def test_render_preserves_foreign_keys(cfg):
