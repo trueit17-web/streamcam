@@ -73,6 +73,50 @@ unmatched = [k for k in cfg.homes if k not in ids and k not in names]
 print("homes: записей %d, не совпали ни с id, ни с названием камеры: %d" % (len(cfg.homes), len(unmatched)))
 print("imou.home задан: %s, аккаунтов imou.accounts с home: %d" % (bool(cfg.imou.home), sum(1 for a in cfg.imou.accounts if a.home)))
 ' </dev/null 2>&1 | tail -n 20 | redact
+# Imou: что отдаёт облако (только теги HLS, без ссылок) и насколько ровно go2rtc отдаёт поток
+echo "== imou: HLS и равномерность потока"
+docker compose exec -T streemcam python -c '
+import re, time, httpx
+from streemcam.config import load_config
+cfg = load_config("/app/config.yaml")
+streams = httpx.get(cfg.go2rtc_url + "/api/streams", timeout=10).json()
+ids = sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n))
+tested = 0
+for name in ids:
+    if tested >= 2:
+        break
+    r = httpx.get("%s/imou/%s" % (cfg.internal_url, name[5:].upper()), params={"key": cfg.internal_key}, timeout=30)
+    if r.status_code != 200:
+        print(name, "internal:", r.status_code); continue
+    url = r.text.split(":", 1)[1].split("#", 1)[0]
+    tested += 1
+    print("--", name)
+    try:
+        pl = httpx.get(url, timeout=15, follow_redirects=True).text
+        tags = [l for l in pl.splitlines() if l.startswith("#EXT")]
+        if any(l.startswith("#EXT-X-STREAM-INF") for l in tags):
+            print("  master:", [l for l in tags if l.startswith("#EXT-X-STREAM-INF")][:3])
+            sub = next(l for l in pl.splitlines() if l and not l.startswith("#"))
+            pl = httpx.get(httpx.URL(url).join(sub), timeout=15, follow_redirects=True).text
+            tags = [l for l in pl.splitlines() if l.startswith("#EXT")]
+        print("  media:", [l for l in tags if not l.startswith("#EXTINF")][:6])
+        print("  EXTINF:", [l[8:].rstrip(",") for l in tags if l.startswith("#EXTINF")])
+    except Exception as e:
+        print("  playlist error:", type(e).__name__)
+    per_sec = [0] * 40
+    t0 = time.monotonic(); first = None
+    try:
+        with httpx.stream("GET", cfg.go2rtc_url + "/api/stream.mp4", params={"src": name}, timeout=40) as s:
+            for chunk in s.iter_bytes():
+                t = time.monotonic() - t0
+                if t >= 40: break
+                if first is None: first = t
+                per_sec[int(t)] += len(chunk)
+    except Exception as e:
+        print("  stream error:", type(e).__name__)
+    print("  первый байт через %.1f с" % (first or -1))
+    print("  КБ по секундам:", [round(b / 1024) for b in per_sec])
+' </dev/null 2>&1 | tail -n 40 | redact
 echo "== go2rtc: последние строки"
 docker compose logs --tail 40 --no-color go2rtc | redact
 
