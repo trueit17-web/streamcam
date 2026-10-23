@@ -107,24 +107,25 @@ def host(url: str) -> str:
 
 async def playlist(http: httpx.AsyncClient, url: str, depth: int = 0) -> str:
     try:
-        r = await http.get(url, timeout=15)
+        r = await http.get(url, timeout=15, follow_redirects=True)
     except httpx.HTTPError as e:
         return f"ошибка {type(e).__name__}"
+    url = str(r.url)
     if r.status_code != 200:
-        return f"HTTP {r.status_code}"
+        return f"HTTP {r.status_code} {host(url)}"
     lines = [ln.strip() for ln in r.text.splitlines() if ln.strip()]
     uris = [ln for ln in lines if not ln.startswith("#")]
     tags = sorted({ln.split(":", 1)[0] for ln in lines if ln.startswith("#")})
     info = [f"{k}={v}" for ln in lines for k, v in [ln[1:].split(":", 1) if ":" in ln else (ln[1:], "")]
             if k in ("EXT-X-TARGETDURATION", "EXT-X-MEDIA-SEQUENCE", "EXT-X-PLAYLIST-TYPE")]
     durs = [ln.split(":", 1)[1].rstrip(",") for ln in lines if ln.startswith("#EXTINF")]
-    out = f"строк {len(lines)}, ссылок {len(uris)}, {' '.join(info)}, EXTINF {durs[:6]}, ENDLIST {'#EXT-X-ENDLIST' in tags}"
+    out = f"{host(url)} строк {len(lines)}, ссылок {len(uris)}, {' '.join(info)}, EXTINF {durs[:6]}, ENDLIST {'#EXT-X-ENDLIST' in tags}"
     if "#EXT-X-STREAM-INF" in tags and uris and depth == 0:
         return out + " | вложенный: " + await playlist(http, urljoin(url, uris[0]), 1)
     if uris:
         seg = urljoin(url, uris[-1])
         try:
-            s = await http.get(seg, timeout=15)
+            s = await http.get(seg, timeout=15, follow_redirects=True)
             out += f" | последний сегмент: HTTP {s.status_code}, {len(s.content)} байт, .{seg.rsplit('.', 1)[-1][:5]}"
         except httpx.HTTPError as e:
             out += f" | сегмент: {type(e).__name__}"
@@ -141,7 +142,7 @@ async def main() -> None:
             client = ImouClient(app_id, secret, api, http)
             cams = await client.list_cameras()
             print(f"## аккаунт {label}: камер {len(cams)}")
-            for cam in cams[:6]:
+            for cam in cams[:2] if label == "основной" else cams:
                 dev = cam.device_id
                 try:
                     online = (await client._call("deviceOnline", {"deviceId": dev})).get("onLine")
@@ -155,6 +156,8 @@ async def main() -> None:
                     continue
                 for s in data.get("streams") or []:
                     hls = s.get("hls") or ""
+                    if not hls.startswith("https://"):
+                        continue
                     print(f"   streamId={s.get('streamId')} status={s.get('status')} {host(hls) if hls else '-'}")
                     if hls.startswith("https://"):
                         print("     " + await playlist(http, hls))
