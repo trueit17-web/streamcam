@@ -130,4 +130,5 @@ recording:
   path: /recordings
   rtsp_url: rtsp://go2rtc:8554
   tuya: true                 # писать камеры Tuya (поток из облака — расходует трафик)
+  imou: true                 # писать камеры Imou (без перекодирования, поток из облака)
   alert_minutes: 10
