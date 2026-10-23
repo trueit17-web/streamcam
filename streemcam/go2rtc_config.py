@@ -41,7 +41,7 @@ def rec_stream_name(cfg: Config, cam: CameraInfo) -> str | None:
     if cam.kind == "tuya":
         return cam.id if cfg.recording.tuya else None
     if cam.kind == "imou":
-        return None  # Imou — только просмотр
+        return cam.id if cfg.recording.imou else None
     src = cfg.camera(cam.id)
     if src is None or not src.record:
         return None

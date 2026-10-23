@@ -27,7 +27,8 @@ def backoff(failures: int) -> float:
 
 
 def ffmpeg_args(input_url: str, out_dir: Path, ffmpeg: str = "ffmpeg",
-                 audio_filter: str | None = None) -> list[str]:
+                 audio_filter: str | None = None, copy_video: bool = False,
+                 video_tag: str | None = None) -> list[str]:
     if urlsplit(input_url).scheme in ("http", "https"):
         input_opts = ["-rw_timeout", "10000000"]
     else:
@@ -36,8 +37,13 @@ def ffmpeg_args(input_url: str, out_dir: Path, ffmpeg: str = "ffmpeg",
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",  # без -nostdin: stdin нужен для мягкой остановки "q"
         *input_opts, "-i", input_url,
         "-map", "0:v:0", "-map", "0:a:0?",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-g", "50",
     ]
+    if copy_video:
+        args += ["-c:v", "copy"]
+        if video_tag:
+            args += ["-tag:v", video_tag]
+    else:
+        args += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-g", "50"]
     if audio_filter:
         args += ["-af", audio_filter]
     args += [
@@ -56,12 +62,14 @@ class RecTarget:
     name: str
     input_url: str
     audio_filter: str | None = None
+    # Imou пишем без перекодирования: 2K HEVC с десятка камер перекодировать дорого
+    copy_video: bool = False
 
 
 def targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
     result = []
     for cam in catalog.all():
-        if cam.kind == "tuya" and cam.online is False:
+        if cam.kind in ("tuya", "imou") and cam.online is False:
             continue
         stream = rec_stream_name(cfg, cam)
         if stream is not None:
@@ -71,7 +79,7 @@ def targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
             else:
                 input_url = f"{cfg.recording.rtsp_url}/{stream}"
                 audio_filter = None
-            result.append(RecTarget(cam.id, cam.name, input_url, audio_filter))
+            result.append(RecTarget(cam.id, cam.name, input_url, audio_filter, copy_video=cam.kind == "imou"))
     return result
 
 
@@ -84,6 +92,10 @@ class _State:
     next_start: float = 0.0
     down_since: float | None = None
     alerted: bool = False
+    # кодек копируемого видео заранее неизвестен: HEVC пишем с меткой hvc1 (иначе Safari не играет),
+    # а H.264 с ней ffmpeg не примет — после неудачного запуска пробуем без метки, и наоборот
+    hvc1: bool = True
+    codec_known: bool = False
 
 
 class Recorder:
@@ -141,6 +153,8 @@ class Recorder:
                 st.next_start = mono + backoff(st.failures)
                 if st.down_since is None:
                     st.down_since = mono
+                if st.target.copy_video and not st.codec_known:
+                    st.hvc1 = not st.hvc1
 
         for cam_id, target in wanted.items():
             st = self._states.get(cam_id)
@@ -162,8 +176,9 @@ class Recorder:
         local = local_now(wall, self.cfg.recording)
         (out_dir / local.strftime("%Y-%m-%d")).mkdir(parents=True, exist_ok=True)
         env = {**os.environ, "TZ": self.cfg.recording.timezone}
+        tag = "hvc1" if st.target.copy_video and st.hvc1 else None
         st.proc = await self._spawn(*ffmpeg_args(st.target.input_url, out_dir, self._ffmpeg,
-                                                  st.target.audio_filter),
+                                                  st.target.audio_filter, st.target.copy_video, tag),
                                     stdin=asyncio.subprocess.PIPE,
                                     stdout=asyncio.subprocess.DEVNULL, env=env)
         st.started_at = mono
@@ -204,6 +219,7 @@ class Recorder:
             newest_mtime = self._newest_mtime(st, wall)
             healthy = newest_mtime is not None and (self._wall_clock() - newest_mtime) <= FRESH_SECONDS
         if healthy:
+            st.codec_known = True
             st.failures = 0
             st.down_since = None
             if st.alerted:

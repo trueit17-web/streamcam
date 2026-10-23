@@ -18,7 +18,7 @@ concurrency:
 jobs:
   status:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       HOST: ${{ secrets.PROD_SSH_HOST }}
       PORT: ${{ secrets.PROD_SSH_PORT || '22' }}

@@ -7,6 +7,7 @@ import pytest
 from streemcam.catalog import Catalog
 from streemcam.go2rtc_config import TUYA_AUDIO_FILTER, tuya_http_input
 from streemcam.recording.recorder import STALL_SECONDS, Recorder, RecTarget, backoff, ffmpeg_args, targets
+from streemcam.imou.models import ImouCamera
 from streemcam.tuya.models import TuyaCamera
 
 
@@ -133,6 +134,56 @@ def test_targets(rcfg):
     assert ts["room"].audio_filter is None
     assert ts["tuya_bf1"].input_url == tuya_http_input("tuya_bf1", "http://go2rtc:1984")
     assert ts["tuya_bf1"].audio_filter == TUYA_AUDIO_FILTER
+
+
+def test_ffmpeg_args_copy_video(tmp_path):
+    args = ffmpeg_args("rtsp://go2rtc:8554/imou_ab", tmp_path / "imou_ab", copy_video=True, video_tag="hvc1")
+    joined = " ".join(args)
+    assert "-c:v copy -tag:v hvc1" in joined
+    assert "libx264" not in args and "-crf" not in args
+    assert "-c:a aac" in joined
+    assert "-tag:v" not in ffmpeg_args("rtsp://x/imou_ab", tmp_path, copy_video=True)
+
+
+def test_targets_imou(rcfg, make_cfg):
+    catalog = Catalog(rcfg)
+    catalog.set_imou([ImouCamera("AB12CD", "Улица", True), ImouCamera("EF34", "Сарай", False)])
+    ts = {t.cam_id: t for t in targets(rcfg, catalog)}
+    assert ts["imou_ab12cd"] == RecTarget("imou_ab12cd", "Улица", "rtsp://go2rtc:8554/imou_ab12cd",
+                                          None, copy_video=True)
+    assert "imou_ef34" not in ts
+    assert ts["yard"].copy_video is False
+    off = make_cfg(recording={"enabled": True, "imou": False})
+    assert all(t.cam_id != "imou_ab12cd" for t in targets(off, catalog))
+
+
+async def test_imou_codec_tag_alternates_until_recording_works(rcfg, tmp_path):
+    catalog = Catalog(rcfg)
+    catalog.set_imou([ImouCamera("AB12CD", "Улица", True)])
+    env = Env(rcfg, catalog)
+
+    def tags():
+        return [c[0][c[0].index("-tag:v") + 1] if "-tag:v" in c[0] else None
+                for c in env.calls if "rtsp://go2rtc:8554/imou_ab12cd" in c[0]]
+
+    await env.rec.tick()
+    assert tags() == ["hvc1"]
+    env.procs[-1].returncode = 1          # H.264 с меткой hvc1 ffmpeg не пишет
+    await env.rec.tick()
+    env.mono += 5
+    await env.rec.tick()
+    assert tags() == ["hvc1", None]
+    # пишет: свежий файл после минуты работы — кодек угадан и больше не меняется
+    day = tmp_path / "imou_ab12cd" / "2026-09-25"
+    (day / "08-00-00.mp4").write_bytes(b"x")
+    os.utime(day / "08-00-00.mp4", (env.wallclock, env.wallclock))
+    env.mono += 61
+    await env.rec.tick()
+    env.procs[-1].returncode = 1
+    await env.rec.tick()
+    env.mono += 5
+    await env.rec.tick()
+    assert tags() == ["hvc1", None, None]
 
 
 def test_targets_skips_offline_tuya_cameras(rcfg):

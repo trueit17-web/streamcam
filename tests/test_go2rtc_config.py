@@ -111,6 +111,7 @@ def test_rec_stream_name(cfg, make_cfg, base_data):
     assert rec_stream_name(cfg, CameraInfo("nope", "X", "config")) is None
 
 
-def test_rec_stream_name_imou_is_none(cfg):
-    from streemcam.go2rtc_config import rec_stream_name
-    assert rec_stream_name(cfg, CameraInfo("imou_ab12cd", "Улица", "imou", device_id="AB12CD")) is None
+def test_rec_stream_name_imou(cfg, make_cfg):
+    imou = CameraInfo("imou_ab12cd", "Улица", "imou", device_id="AB12CD")
+    assert rec_stream_name(cfg, imou) == "imou_ab12cd"
+    assert rec_stream_name(make_cfg(recording={"imou": False}), imou) is None
