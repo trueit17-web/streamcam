@@ -86,6 +86,22 @@ for name in sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n)):
     body = "ok" if r.status_code == 200 else r.text[:80]
     print(name, r.status_code, body)
 ' </dev/null 2>&1 | tail -n 40 | redact
+# пробный запуск ffmpeg в контейнере go2rtc на одной рабочей и одной проблемной камере (ссылка не печатается)
+for dev in 7927BCCRSF3D0BB B193DCFPSF9CDE9 C7AA8CEPSF63BF1; do
+  url=$(docker compose exec -T streemcam python -c '
+import sys, httpx
+from streemcam.config import load_config
+cfg = load_config("/app/config.yaml")
+r = httpx.get("%s/imou/%s" % (cfg.internal_url, sys.argv[1]), params={"key": cfg.internal_key}, timeout=40)
+print(r.text.split(":", 1)[1].split("#", 1)[0] if r.status_code == 200 else "")
+' "$dev" </dev/null 2>/dev/null | tr -d '\r')
+  [ -n "$url" ] || { echo "-- $dev: нет ссылки"; continue; }
+  for re in "" "-re"; do
+    echo "-- $dev ffmpeg ${re:-без -re}"
+    docker compose exec -T go2rtc timeout 25 ffmpeg -hide_banner $re -fflags nobuffer -flags low_delay -i "$url" \
+      -t 8 -map 0 -c copy -f null - </dev/null 2>&1 | grep -Ev "^\s*$|frame=|size=" | tail -n 12 | redact
+  done
+done
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
 echo "== go2rtc: последние строки"
