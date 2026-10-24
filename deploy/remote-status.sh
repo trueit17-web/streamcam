@@ -86,6 +86,98 @@ for name in sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n)):
     body = "ok" if r.status_code == 200 else r.text[:80]
     print(name, r.status_code, body)
 ' </dev/null 2>&1 | tail -n 40 | redact
+# запись: по каждой камере — сколько файлов за сегодня и последний файл с размером
+echo "== запись за сегодня (recordings/<камера>/<дата>)"
+today=$(TZ=Europe/Moscow date +%F)
+for d in recordings/*/; do
+  cam=$(basename "$d")
+  n=$(ls "$d$today"/*.mp4 2>/dev/null | wc -l)
+  last=$(ls -t "$d$today"/*.mp4 2>/dev/null | head -1)
+  if [ -n "$last" ]; then
+    echo "$cam: файлов $n, последний $(basename "$last") $(stat -c '%s байт, изменён %y' "$last" | cut -c1-60)"
+  else
+    echo "$cam: сегодня файлов нет"
+  fi
+done
+# Imou: статус камер, привязки live и содержимое HLS-плейлистов (без ссылок)
+echo "== imou: облако по камерам"
+docker compose exec -T streemcam python - 2>&1 <<'PY' | tail -n 120 | redact
+# Диагностика Imou для status.yml: что облако отдаёт по каждой камере. Ссылки и токены не печатаются.
+import asyncio
+import re
+from urllib.parse import urljoin, urlsplit
+
+import httpx
+
+from streemcam.config import load_config
+from streemcam.imou.client import ImouClient
+
+
+def host(url: str) -> str:
+    u = urlsplit(url)
+    return f"{u.scheme}://{u.hostname}:{u.port or ''}"
+
+
+async def playlist(http: httpx.AsyncClient, url: str, depth: int = 0) -> str:
+    try:
+        r = await http.get(url, timeout=15, follow_redirects=True)
+    except httpx.HTTPError as e:
+        return f"ошибка {type(e).__name__}"
+    url = str(r.url)
+    if r.status_code != 200:
+        return f"HTTP {r.status_code} {host(url)}"
+    lines = [ln.strip() for ln in r.text.splitlines() if ln.strip()]
+    uris = [ln for ln in lines if not ln.startswith("#")]
+    tags = sorted({ln.split(":", 1)[0] for ln in lines if ln.startswith("#")})
+    info = [f"{k}={v}" for ln in lines for k, v in [ln[1:].split(":", 1) if ":" in ln else (ln[1:], "")]
+            if k in ("EXT-X-TARGETDURATION", "EXT-X-MEDIA-SEQUENCE", "EXT-X-PLAYLIST-TYPE")]
+    durs = [ln.split(":", 1)[1].rstrip(",") for ln in lines if ln.startswith("#EXTINF")]
+    out = f"{host(url)} строк {len(lines)}, ссылок {len(uris)}, {' '.join(info)}, EXTINF {durs[:6]}, ENDLIST {'#EXT-X-ENDLIST' in tags}"
+    if "#EXT-X-STREAM-INF" in tags and uris and depth == 0:
+        return out + " | вложенный: " + await playlist(http, urljoin(url, uris[0]), 1)
+    if uris:
+        seg = urljoin(url, uris[-1])
+        try:
+            s = await http.get(seg, timeout=15, follow_redirects=True)
+            out += f" | последний сегмент: HTTP {s.status_code}, {len(s.content)} байт, .{seg.rsplit('.', 1)[-1][:5]}"
+        except httpx.HTTPError as e:
+            out += f" | сегмент: {type(e).__name__}"
+    return out
+
+
+async def main() -> None:
+    cfg = load_config("/app/config.yaml")
+    async with httpx.AsyncClient(timeout=20) as http:
+        accounts = [("основной", cfg.imou.app_id, cfg.imou.app_secret, cfg.imou.api_url)]
+        accounts += [(f"доп.{i}", a.app_id, a.app_secret, a.api_url)
+                     for i, a in enumerate(cfg.imou.accounts, 1) if a.app_id and a.app_secret]
+        for label, app_id, secret, api in accounts:
+            client = ImouClient(app_id, secret, api, http)
+            cams = await client.list_cameras()
+            print(f"## аккаунт {label}: камер {len(cams)}")
+            for cam in cams[:2] if label == "основной" else cams:
+                dev = cam.device_id
+                try:
+                    online = (await client._call("deviceOnline", {"deviceId": dev})).get("onLine")
+                except Exception as e:  # noqa: BLE001
+                    online = f"ошибка {e}"
+                print(f"-- {dev} online={online}")
+                try:
+                    data = await client._call("getLiveStreamInfo", {"deviceId": dev, "channelId": "0"})
+                except Exception as e:  # noqa: BLE001
+                    print(f"   getLiveStreamInfo: {client._redact(str(e))}")
+                    continue
+                for s in data.get("streams") or []:
+                    hls = s.get("hls") or ""
+                    if not hls.startswith("https://"):
+                        continue
+                    print(f"   streamId={s.get('streamId')} status={s.get('status')} {host(hls) if hls else '-'}")
+                    if hls.startswith("https://"):
+                        print("     " + await playlist(http, hls))
+
+
+asyncio.run(main())
+PY
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
 echo "== go2rtc: последние строки"
