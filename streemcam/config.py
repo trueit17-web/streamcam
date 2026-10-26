@@ -140,7 +140,7 @@ class RecordingConfig(BaseModel):
     path: str = "recordings"
     rtsp_url: str = "rtsp://127.0.0.1:8554"
     tuya: bool = True
-    imou: bool = True
+    imou: bool = False
     alert_minutes: int = 10
 
     @field_validator("start", "end")

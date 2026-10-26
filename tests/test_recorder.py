@@ -72,7 +72,8 @@ class Env:
 @pytest.fixture
 def rcfg(make_cfg, tmp_path):
     return make_cfg(go2rtc_url="http://go2rtc:1984",
-                    recording={"enabled": True, "path": str(tmp_path), "rtsp_url": "rtsp://go2rtc:8554"})
+                    recording={"enabled": True, "path": str(tmp_path), "rtsp_url": "rtsp://go2rtc:8554",
+                               "imou": True})
 
 
 def test_backoff():
@@ -153,7 +154,7 @@ def test_targets_imou(rcfg, make_cfg):
                                           None, copy_video=True)
     assert "imou_ef34" not in ts
     assert ts["yard"].copy_video is False
-    off = make_cfg(recording={"enabled": True, "imou": False})
+    off = make_cfg(recording={"enabled": True})
     assert all(t.cam_id != "imou_ab12cd" for t in targets(off, catalog))
 
 
