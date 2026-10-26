@@ -113,5 +113,5 @@ def test_rec_stream_name(cfg, make_cfg, base_data):
 
 def test_rec_stream_name_imou(cfg, make_cfg):
     imou = CameraInfo("imou_ab12cd", "Улица", "imou", device_id="AB12CD")
-    assert rec_stream_name(cfg, imou) == "imou_ab12cd"
-    assert rec_stream_name(make_cfg(recording={"imou": False}), imou) is None
+    assert rec_stream_name(cfg, imou) is None
+    assert rec_stream_name(make_cfg(recording={"imou": True}), imou) == "imou_ab12cd"
