@@ -86,6 +86,41 @@ for name in sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n)):
     body = "ok" if r.status_code == 200 else r.text[:80]
     print(name, r.status_code, body)
 ' </dev/null 2>&1 | tail -n 40 | redact
+echo "== imou: доп. аккаунты — статус из списка, deviceOnline и плейлист (временно)"
+docker compose exec -T streemcam python - 2>&1 <<'PY' | tail -n 40 | redact
+import asyncio
+from urllib.parse import urlsplit
+import httpx
+from streemcam.config import load_config
+from streemcam.imou.client import ImouClient
+
+
+async def main():
+    cfg = load_config("/app/config.yaml")
+    async with httpx.AsyncClient(timeout=20) as http:
+        for i, a in enumerate(cfg.imou.accounts, 1):
+            c = ImouClient(a.app_id, a.app_secret, a.api_url, http)
+            data = await c._call("deviceBaseList", {"bindId": -1, "limit": 50, "type": "bindAndShare", "needApInfo": False})
+            ids = [d["deviceId"] for d in data.get("deviceList") or []]
+            det = await c._call("deviceBaseDetailList", {"deviceList": [{"deviceId": d, "channelList": "0"} for d in ids]})
+            for d in det.get("deviceList") or []:
+                keys = sorted(k for k in d if "status" in k.lower() or "online" in k.lower())
+                on = (await c._call("deviceOnline", {"deviceId": d["deviceId"]})).get("onLine")
+                print(f"доп.{i}", d["deviceId"], {k: d[k] for k in keys}, "deviceOnline", on)
+            dev = ids[0]
+            info = await c._call("getLiveStreamInfo", {"deviceId": dev, "channelId": "0"})
+            for s in info.get("streams") or []:
+                hls = s.get("hls") or ""
+                if hls.startswith("https://"):
+                    r = await http.get(hls, follow_redirects=True)
+                    u = urlsplit(str(r.url))
+                    print("  ", dev, "streamId", s.get("streamId"), r.status_code, f"{u.hostname}:{u.port}",
+                          "ENDLIST" if "#EXT-X-ENDLIST" in r.text else "live", "MEDIA-SEQUENCE" ,
+                          next((l.split(":")[1] for l in r.text.splitlines() if l.startswith("#EXT-X-MEDIA-SEQUENCE")), "-"))
+
+
+asyncio.run(main())
+PY
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
 echo "== go2rtc: последние строки"
