@@ -173,8 +173,10 @@ def test_desired_streams_imou(cfg):
     assert d["imou_ab12cd"] == f"echo:curl -fsS {URL}/imou/AB12CD?key={KEY}"
     assert imou_src(URL, "AB12CD", KEY) == d["imou_ab12cd"]
     assert d["imou_ab12cd~h264"] == compat_src("imou_ab12cd")
+    assert d["imou_ab12cd~rec"] == f"echo:curl -fsS {URL}/imou/AB12CD?key={KEY}&sd=1"
+    assert imou_src(URL, "AB12CD", KEY, sd=True) == d["imou_ab12cd~rec"]
     assert "imou_ab12cd~live" not in d
-    assert len(d) == 2
+    assert len(d) == 3
 
 
 async def test_sync_replaces_imou_keeps_tuya_and_others(cfg):
@@ -203,7 +205,8 @@ async def test_imou_no_change_skips_writes(cfg):
     catalog = Catalog(cfg)
     catalog.set_imou([ImouCamera("AB12CD", "Улица", True)])
     config = {"streams": {"imou_ab12cd": imou_src(URL, "AB12CD", KEY),
-                          "imou_ab12cd~h264": compat_src("imou_ab12cd")}}
+                          "imou_ab12cd~h264": compat_src("imou_ab12cd"),
+                          "imou_ab12cd~rec": imou_src(URL, "AB12CD", KEY, sd=True)}}
     calls, http = recorder(yaml.safe_dump(config))
     await Go2rtcSync(http, catalog, URL, KEY).sync()
     assert calls == [("GET", None)]

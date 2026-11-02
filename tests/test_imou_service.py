@@ -15,11 +15,11 @@ class FakeClient:
             raise self.fail
         return self.cams
 
-    async def stream_url(self, device_id):
+    async def stream_urls(self, device_id):
         self.stream_calls = getattr(self, "stream_calls", 0) + 1
         if self.fail:
             raise self.fail
-        return f"https://h/{device_id}.m3u8"
+        return {0: f"https://h/{device_id}.m3u8", 1: f"https://h/{device_id}-sd.m3u8"}
 
 
 class FakeSync:
@@ -93,12 +93,28 @@ async def test_stream_url_delegates(env):
     assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
 
 
-async def test_stream_url_cached_including_errors(cfg):
-    from streemcam.imou.service import STREAM_CACHE_SECONDS
+async def test_stream_url_sd(env):
+    svc, client, *_ = env
+    assert await svc.stream_url("AB12CD", sd=True) == "https://h/AB12CD-sd.m3u8"
+    assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
+    assert client.stream_calls == 1  # HD и SD приходят одним вызовом
+
+
+async def test_stream_url_sd_falls_back_to_hd(cfg):
+    class HdOnly(FakeClient):
+        async def stream_urls(self, device_id):
+            return {0: "https://h/hd.m3u8"}
+    svc = ImouService(cfg, Catalog(cfg), HdOnly())
+    assert await svc.stream_url("AB12CD", sd=True) == "https://h/hd.m3u8"
+
+
+async def test_stream_url_cached_for_hours_errors_for_minutes(cfg):
+    from streemcam.imou.service import STREAM_CACHE_SECONDS, STREAM_ERROR_SECONDS
     t = [0.0]
     client = FakeClient()
     svc = ImouService(cfg, Catalog(cfg), client, clock=lambda: t[0])
     assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
+    t[0] = 3600.0                       # снимок раз в час: адрес из кэша, без вызова API
     assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
     assert client.stream_calls == 1
     t[0] = STREAM_CACHE_SECONDS
@@ -107,7 +123,25 @@ async def test_stream_url_cached_including_errors(cfg):
         with pytest.raises(ImouError):
             await svc.stream_url("AB12CD")
     assert client.stream_calls == 2
-    t[0] = 2 * STREAM_CACHE_SECONDS
+    t[0] += STREAM_ERROR_SECONDS
     client.fail = None
     assert await svc.stream_url("AB12CD") == "https://h/AB12CD.m3u8"
     assert client.stream_calls == 3
+
+
+async def test_quick_reconnect_refreshes_at_most_every_few_minutes(cfg):
+    from streemcam.imou.service import STREAM_REFRESH_SECONDS
+    t = [0.0]
+    client = FakeClient()
+    svc = ImouService(cfg, Catalog(cfg), client, clock=lambda: t[0])
+    await svc.stream_url("AB12CD")
+    while t[0] < STREAM_REFRESH_SECONDS - 5:  # go2rtc переподключается каждые 5 с: по адресу нет видео
+        t[0] += 5
+        await svc.stream_url("AB12CD")
+    assert client.stream_calls == 1
+    t[0] += 5
+    await svc.stream_url("AB12CD")      # адрес старше 5 минут и снова нужен сразу — обновляем
+    assert client.stream_calls == 2
+    t[0] += 5
+    await svc.stream_url("AB12CD")
+    assert client.stream_calls == 2

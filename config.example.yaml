@@ -26,7 +26,7 @@ imou:
   app_id: ${IMOU_APP_ID:-}   # ключи с open.imoulife.com (тот же аккаунт, что в Imou Life)
   app_secret: ${IMOU_APP_SECRET:-}
   # api_url: https://openapi-fk.easy4ip.com/openapi   # если аккаунт в другом регионе
-  refresh_minutes: 10
+  refresh_minutes: 60        # не чаще раза в час: у Imou лимит на число запросов к API
   snapshot_minutes: 15
   home: Город                # дом для всех камер Imou основного аккаунта (без строки — «Другие камеры»)
   # Камеры другого дома: облако отдаёт видео только по ключам аккаунта, к которому камера привязана,
@@ -130,5 +130,5 @@ recording:
   path: /recordings
   rtsp_url: rtsp://go2rtc:8554
   tuya: true                 # писать камеры Tuya (поток из облака — расходует трафик)
-  imou: false                # писать камеры Imou: облако Imou ограничивает трафик, запись быстро его исчерпывает
+  imou: true                 # писать камеры Imou (SD-поток из облака: меньше трафика)
   alert_minutes: 10

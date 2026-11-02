@@ -10,8 +10,16 @@ from .models import ImouAuthError, ImouError
 log = logging.getLogger(__name__)
 
 FAILURE_ALERT_AFTER = 3
-# go2rtc переподключает пустой поток несколько раз в секунду; без кэша каждый раз уходит запрос в облако
-STREAM_CACHE_SECONDS = 20
+# У Imou лимиты на число вызовов API. Адрес живого HLS живёт долго, поэтому удачный ответ держим часами,
+# а ошибку — минуты: go2rtc переподключает пустой поток несколько раз в секунду.
+STREAM_CACHE_SECONDS = 6 * 3600
+STREAM_ERROR_SECONDS = 300
+# go2rtc спросил адрес снова вскоре после прошлого раза — значит, по старому адресу видео не пошло.
+# Тогда адрес обновляем, но не чаще раза в STREAM_REFRESH_SECONDS.
+RECONNECT_SECONDS = 60
+STREAM_REFRESH_SECONDS = 300
+# список камер меняется редко; каждое обновление — несколько вызовов API на аккаунт
+MIN_REFRESH_MINUTES = 60
 AUTH_TEXT = "⚠️ Imou: облако отклонило appId/appSecret. Проверьте IMOU_APP_ID и IMOU_APP_SECRET в .env."
 FAIL_TEXT = ("⚠️ Imou: не удаётся получить список камер несколько раз подряд. "
              "Проверьте доступ к облаку Imou и imou.api_url.")
@@ -30,7 +38,8 @@ class ImouService:
         self._failures = 0
         self._auth_alerted = False
         self._clock = clock
-        self._streams: dict[str, tuple[float, str | ImouError]] = {}
+        self._streams: dict[str, tuple[float, dict[int, str] | ImouError]] = {}
+        self._asked: dict[str, float] = {}
 
     async def refresh(self) -> bool:
         try:
@@ -56,24 +65,38 @@ class ImouService:
             await self._sync.sync()
         return True
 
-    async def stream_url(self, device_id: str) -> str:
-        now = self._clock()
+    def _stale(self, device_id: str, now: float) -> bool:
         cached = self._streams.get(device_id)
-        if cached is None or now - cached[0] >= STREAM_CACHE_SECONDS:
+        if cached is None:
+            return True
+        at, result = cached
+        if isinstance(result, ImouError):
+            return now - at >= STREAM_ERROR_SECONDS
+        if now - at >= STREAM_CACHE_SECONDS:
+            return True
+        asked = self._asked.get(device_id)
+        reconnect = asked is not None and now - asked < RECONNECT_SECONDS
+        return reconnect and now - at >= STREAM_REFRESH_SECONDS
+
+    async def stream_url(self, device_id: str, sd: bool = False) -> str:
+        """Адрес потока; sd=True — второй (SD) поток, если облако его отдаёт: меньше трафика для записи."""
+        now = self._clock()
+        if self._stale(device_id, now):
             try:
-                result: str | ImouError = await self.client.stream_url(device_id)
+                result: dict[int, str] | ImouError = await self.client.stream_urls(device_id)
             except ImouError as e:
                 result = e
-            cached = (now, result)
-            self._streams[device_id] = cached
-        if isinstance(cached[1], ImouError):
-            raise cached[1]
-        return cached[1]
+            self._streams[device_id] = (now, result)
+        self._asked[device_id] = now
+        result = self._streams[device_id][1]
+        if isinstance(result, ImouError):
+            raise result
+        return result.get(1 if sd else 0) or result[0]
 
     async def run(self) -> None:
         while True:
             await self.refresh()
-            await asyncio.sleep(self.cfg.imou.refresh_minutes * 60)
+            await asyncio.sleep(max(self.cfg.imou.refresh_minutes, MIN_REFRESH_MINUTES) * 60)
 
     async def _alert(self, text: str) -> None:
         if self._on_alert is not None:

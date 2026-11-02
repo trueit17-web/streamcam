@@ -67,11 +67,11 @@ class FakeImou:
         self.fail = False
         self.asked = []
 
-    async def stream_url(self, device_id):
-        self.asked.append(device_id)
+    async def stream_url(self, device_id, sd=False):
+        self.asked.append((device_id, sd))
         if self.fail:
             raise ImouError("boom")
-        return f"https://h/{device_id}.m3u8"
+        return f"https://h/{device_id}{'-sd' if sd else ''}.m3u8"
 
 
 def make_imou(cfg, imou="fake", tuya=None):
@@ -87,7 +87,10 @@ def test_imou_ok(cfg):
     assert r.status_code == 200
     assert r.text == "ffmpeg:https://h/AB12CD.m3u8#input=imou_hls#video=copy#audio=aac"
     assert r.headers["content-type"].startswith("text/plain")
-    assert imou.asked == ["AB12CD"]
+    assert imou.asked == [("AB12CD", False)]
+    r = client.get(f"/imou/AB12CD?key={KEY}&sd=1")
+    assert r.text == "ffmpeg:https://h/AB12CD-sd.m3u8#input=imou_hls#video=copy#audio=aac"
+    assert imou.asked[-1] == ("AB12CD", True)
 
 
 def test_imou_bad_key(cfg):
@@ -135,7 +138,7 @@ def test_offline_cameras_not_asked(cfg):
 
 def test_imou_cloud_rtsp_without_hls_input(cfg):
     class RtspImou(FakeImou):
-        async def stream_url(self, device_id):
+        async def stream_url(self, device_id, sd=False):
             return f"rtsp://cloud/{device_id}"
     client, _ = make_imou(cfg, imou=RtspImou())
     r = client.get(f"/imou/AB12CD?key={KEY}")

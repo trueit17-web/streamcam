@@ -314,3 +314,36 @@ async def test_stream_url_bad_credentials_propagate():
     client, _ = make({"accessToken": [err("OP1008")]})
     with pytest.raises(ImouAuthError):
         await client.stream_url("AB12CD")
+
+
+async def test_list_cameras_uses_detail_status_without_device_online():
+    client, cloud = make({
+        "accessToken": [TOKEN],
+        "deviceBaseList": [ok({"deviceList": [{"deviceId": "A"}, {"deviceId": "B"}, {"deviceId": "C"}]})],
+        "deviceBaseDetailList": [ok({"deviceList": [{"deviceId": "A", "name": "Двор", "status": "online"},
+                                                    {"deviceId": "B", "name": "Сад", "deviceStatus": "offline"},
+                                                    {"deviceId": "C", "name": "Гараж"}]})],
+        "deviceOnline": [ok({"onLine": "4"})],
+    })
+    assert await client.list_cameras() == [
+        ImouCamera("A", "Двор", True), ImouCamera("B", "Сад", False), ImouCamera("C", "Гараж", True)]
+    # deviceOnline — только для камеры, по которой облако не отдало статус
+    assert [b["params"]["deviceId"] for m, b in cloud.calls if m == "deviceOnline"] == ["C"]
+    assert client.calls == len(cloud.calls)
+
+
+async def test_stream_urls_hd_and_sd_in_one_call():
+    client, cloud = make({"accessToken": [TOKEN], "getLiveStreamInfo": [
+        live(stream(1, "https://h/1.m3u8"), stream(0, "https://h/0.m3u8"))]})
+    assert await client.stream_urls("AB12CD") == {0: "https://h/0.m3u8", 1: "https://h/1.m3u8"}
+    assert await client.stream_url("AB12CD", sd=True) == "https://h/1.m3u8"
+    assert cloud.methods().count("getLiveStreamInfo") == 2
+
+
+async def test_stream_urls_without_hd_binds():
+    client, cloud = make({"accessToken": [TOKEN],
+                          "getLiveStreamInfo": [live(stream(1, "https://h/1.m3u8")),
+                                                live(stream(0, "https://h/0.m3u8"))],
+                          "bindDeviceLive": [ok({})]})
+    assert await client.stream_urls("AB12CD") == {0: "https://h/0.m3u8"}
+    assert "bindDeviceLive" in cloud.methods()
