@@ -86,6 +86,14 @@ for name in sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n)):
     body = "ok" if r.status_code == 200 else r.text[:80]
     print(name, r.status_code, body)
 ' </dev/null 2>&1 | tail -n 40 | redact
+# WireGuard: сколько секунд назад каждый дом выходил на связь (без ключей и адресов — лог публичный)
+if docker compose ps --status running --services | grep -qx wireguard; then
+  echo "== wireguard: последнее рукопожатие по домам"
+  now=$(date +%s)
+  docker compose exec -T wireguard wg show wg0 latest-handshakes </dev/null 2>&1 \
+    | awk -v now="$now" '{ if ($2 == 0) print "дом " NR ": ещё не подключался"; else print "дом " NR ": " now - $2 " с назад" }'
+  docker compose logs --since "${hours}h" --no-color wireguard 2>&1 | grep -iE "error|fail|warn" | tail -n 10 | redact
+fi
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
 echo "== go2rtc: последние строки"
