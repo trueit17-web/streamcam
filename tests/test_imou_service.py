@@ -145,3 +145,24 @@ async def test_quick_reconnect_refreshes_at_most_every_few_minutes(cfg):
     t[0] += 5
     await svc.stream_url("AB12CD")
     assert client.stream_calls == 2
+
+
+async def test_same_address_on_refresh_doubles_the_pause(cfg):
+    from streemcam.imou.service import STREAM_REFRESH_SECONDS
+    t = [0.0]
+    client = FakeClient()
+    svc = ImouService(cfg, Catalog(cfg), client, clock=lambda: t[0])
+
+    async def reconnect_loop(seconds):
+        end = t[0] + seconds
+        while t[0] < end:
+            t[0] += 5
+            await svc.stream_url("AB12CD")
+
+    await svc.stream_url("AB12CD")
+    await reconnect_loop(STREAM_REFRESH_SECONDS)
+    assert client.stream_calls == 2      # через 5 минут обновили, облако отдало тот же адрес
+    await reconnect_loop(2 * STREAM_REFRESH_SECONDS - 10)
+    assert client.stream_calls == 2      # следующая попытка — только через 10 минут
+    await reconnect_loop(10)
+    assert client.stream_calls == 3

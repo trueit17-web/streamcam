@@ -15,7 +15,8 @@ FAILURE_ALERT_AFTER = 3
 STREAM_CACHE_SECONDS = 6 * 3600
 STREAM_ERROR_SECONDS = 300
 # go2rtc спросил адрес снова вскоре после прошлого раза — значит, по старому адресу видео не пошло.
-# Тогда адрес обновляем, но не чаще раза в STREAM_REFRESH_SECONDS.
+# Тогда адрес обновляем, но не чаще раза в STREAM_REFRESH_SECONDS. Если облако снова отдаёт тот же адрес
+# (например, заглушку вместо видео, когда кончился трафик), пауза до следующего обновления удваивается.
 RECONNECT_SECONDS = 60
 STREAM_REFRESH_SECONDS = 300
 # список камер меняется редко; каждое обновление — несколько вызовов API на аккаунт
@@ -40,6 +41,7 @@ class ImouService:
         self._clock = clock
         self._streams: dict[str, tuple[float, dict[int, str] | ImouError]] = {}
         self._asked: dict[str, float] = {}
+        self._refresh_after: dict[str, float] = {}
 
     async def refresh(self) -> bool:
         try:
@@ -76,7 +78,7 @@ class ImouService:
             return True
         asked = self._asked.get(device_id)
         reconnect = asked is not None and now - asked < RECONNECT_SECONDS
-        return reconnect and now - at >= STREAM_REFRESH_SECONDS
+        return reconnect and now - at >= self._refresh_after.get(device_id, STREAM_REFRESH_SECONDS)
 
     async def stream_url(self, device_id: str, sd: bool = False) -> str:
         """Адрес потока; sd=True — второй (SD) поток, если облако его отдаёт: меньше трафика для записи."""
@@ -86,6 +88,12 @@ class ImouService:
                 result: dict[int, str] | ImouError = await self.client.stream_urls(device_id)
             except ImouError as e:
                 result = e
+            previous = self._streams.get(device_id)
+            if previous is not None and previous[1] == result:
+                self._refresh_after[device_id] = min(
+                    2 * self._refresh_after.get(device_id, STREAM_REFRESH_SECONDS), STREAM_CACHE_SECONDS)
+            else:
+                self._refresh_after.pop(device_id, None)
             self._streams[device_id] = (now, result)
         self._asked[device_id] = now
         result = self._streams[device_id][1]
