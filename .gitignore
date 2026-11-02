@@ -7,4 +7,4 @@ config.yaml
 data/
 go2rtc/
 recordings/
-wireguard/
+/wireguard/
