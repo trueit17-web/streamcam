@@ -35,7 +35,7 @@ def create_internal_app(catalog: Catalog, tuya, internal_key: str | None, imou=N
         return PlainTextResponse(url)
 
     @app.get("/imou/{device_id}")
-    async def imou_stream(device_id: str, key: str = ""):
+    async def imou_stream(device_id: str, key: str = "", sd: int = 0):
         if not internal_key or not hmac.compare_digest(key.encode(), internal_key.encode()):
             return PlainTextResponse("forbidden", status_code=403)
         cam = next((c for c in catalog.imou() if c.device_id == device_id), None)
@@ -44,7 +44,7 @@ def create_internal_app(catalog: Catalog, tuya, internal_key: str | None, imou=N
         if not cam.online:  # офлайн по облаку: не тратим запрос и не будим камеру
             return PlainTextResponse("camera offline", status_code=503)
         try:
-            url = await imou.stream_url(device_id)
+            url = await imou.stream_url(device_id, sd=bool(sd))
         except ImouError as e:
             log.warning("imou stream url for %s failed: %s", device_id, e)
             return PlainTextResponse("imou cloud error", status_code=502)

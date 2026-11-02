@@ -5,7 +5,7 @@ import httpx
 import yaml
 
 from .catalog import Catalog
-from .go2rtc_config import COMPAT_SUFFIX, LIVE_SUFFIX, compat_name, compat_src, tuya_compat_src, tuya_live_src
+from .go2rtc_config import COMPAT_SUFFIX, LIVE_SUFFIX, REC_SUFFIX, compat_name, compat_src, tuya_compat_src, tuya_live_src
 
 log = logging.getLogger(__name__)
 
@@ -20,9 +20,9 @@ def tuya_src(internal_url: str, device_id: str, key: str) -> str:
     return f"echo:curl -fsS {internal_url}/tuya/{device_id}?key={key}"
 
 
-def imou_src(internal_url: str, device_id: str, key: str) -> str:
+def imou_src(internal_url: str, device_id: str, key: str, sd: bool = False) -> str:
     # device_id проверен Catalog.set_imou (^[A-Za-z0-9]+$)
-    return f"echo:curl -fsS {internal_url}/imou/{device_id}?key={key}"
+    return f"echo:curl -fsS {internal_url}/imou/{device_id}?key={key}" + ("&sd=1" if sd else "")
 
 
 def desired_streams(catalog: Catalog, internal_url: str, key: str | None) -> dict[str, str]:
@@ -39,6 +39,7 @@ def desired_streams(catalog: Catalog, internal_url: str, key: str | None) -> dic
     for cam in catalog.imou():
         streams[cam.id] = imou_src(internal_url, cam.device_id, key)
         streams[compat_name(cam.id)] = compat_src(cam.id)
+        streams[cam.id + REC_SUFFIX] = imou_src(internal_url, cam.device_id, key, sd=True)  # запись: SD, меньше трафика
     return streams
 
 

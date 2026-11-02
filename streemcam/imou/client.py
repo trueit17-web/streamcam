@@ -15,6 +15,9 @@ TOKEN_EXPIRED = "TK1002"
 LIVE_MISSING = "LV1002"
 LIVE_EXISTS = "LV1001"
 ONLINE_STATES = ("1", "4")  # 4 — камера спит, но просыпается по запросу потока
+# статус в deviceBaseDetailList: если облако его отдаёт, deviceOnline по каждой камере не нужен
+DETAIL_ONLINE = ("online", "sleep", "1", "4")
+DETAIL_OFFLINE = ("offline", "0")
 PAGE_LIMIT = 50
 SHARE_PAGE = 100   # queryRange shareDeviceList: не больше 100 записей за раз
 SHARE_MAX_PAGES = 5
@@ -38,6 +41,7 @@ class ImouClient:
         self._clock = clock
         self._nonce = nonce
         self._token: str | None = None
+        self.calls = 0  # обращений к API с запуска: у Imou лимиты на число вызовов
 
     def _redact(self, text: str) -> str:
         for secret in (self._app_secret, self._token):
@@ -54,6 +58,7 @@ class ImouClient:
             "params": params,
             "id": str(random.randint(1, 10000)),
         }
+        self.calls += 1
         try:
             r = await self._http.post(f"{self.api_url}/{method}", json=body)
         except httpx.HTTPError as e:
@@ -108,12 +113,21 @@ class ImouClient:
         if ids:
             detail = await self._call("deviceBaseDetailList",
                                       {"deviceList": [{"deviceId": d, "channelList": "0"} for d in ids]})
-            names = {d.get("deviceId"): d.get("name") for d in detail.get("deviceList") or []}
+            details = {d.get("deviceId"): d for d in detail.get("deviceList") or []}
             for device_id in ids:
-                cams.append(ImouCamera(device_id, names.get(device_id) or device_id, await self._online(device_id)))
+                d = details.get(device_id) or {}
+                status = str(d.get("deviceStatus") or d.get("status") or "").lower()
+                if status in DETAIL_ONLINE:
+                    online = True
+                elif status in DETAIL_OFFLINE:
+                    online = False
+                else:
+                    online = await self._online(device_id)
+                cams.append(ImouCamera(device_id, d.get("name") or device_id, online))
         # камеры, которыми поделились в приложении Imou Life, deviceBaseList не отдаёт
         shared = [c for c in await self._shared_cameras() if c.device_id not in ids]
-        log.info("imou: %d own cameras, %d shared from the app", len(cams), len(shared))
+        log.info("imou: %d own cameras, %d shared from the app, %d API calls since start",
+                 len(cams), len(shared), self.calls)
         return cams + shared
 
     async def _shared_cameras(self) -> list[ImouCamera]:
@@ -146,18 +160,20 @@ class ImouClient:
             return False
         return str(data.get("onLine")) in ONLINE_STATES
 
-    async def _live_hls(self, device_id: str) -> str | None:
+    async def _live_hls(self, device_id: str) -> dict[int, str]:
+        """HLS-адреса живого потока по streamId (0 — HD, 1 — SD); один вызов отдаёт оба."""
         try:
             data = await self._call("getLiveStreamInfo", {"deviceId": device_id, "channelId": "0"})
         except _ApiError as e:
             if e.code == LIVE_MISSING:
-                return None
+                return {}
             raise
+        urls: dict[int, str] = {}
         for s in data.get("streams") or []:
             hls = s.get("hls") or ""
-            if s.get("streamId") == 0 and str(s.get("status")) == "1" and hls.startswith("https://"):
-                return hls
-        return None
+            if s.get("streamId") in (0, 1) and str(s.get("status")) == "1" and hls.startswith("https://"):
+                urls.setdefault(s["streamId"], hls)
+        return urls if 0 in urls else {}
 
     async def _cloud_rtsp(self, device_id: str) -> str | None:
         # запасной путь, если HLS не отдали; OP1009 здесь — нет прав на эту камеру, а не плохой ключ
@@ -169,28 +185,33 @@ class ImouClient:
         url = data.get("url") or ""
         return url if url.startswith(("rtsp://", "rtsps://")) else None
 
-    async def _hls_url(self, device_id: str) -> str:
-        url = await self._live_hls(device_id)
-        if url:
-            return url
+    async def _hls_urls(self, device_id: str) -> dict[int, str]:
+        urls = await self._live_hls(device_id)
+        if urls:
+            return urls
         try:
             await self._call("bindDeviceLive", {"deviceId": device_id, "channelId": "0", "streamId": 0})
         except _ApiError as e:
             if e.code != LIVE_EXISTS:
                 raise
-        url = await self._live_hls(device_id)
-        if not url:
+        urls = await self._live_hls(device_id)
+        if not urls:
             raise ImouError(f"no live stream for {device_id}")
-        return url
+        return urls
 
-    async def stream_url(self, device_id: str) -> str:
-        # HLS работает для своих камер; облачный RTSP Imou ffmpeg не открывает, он только запасной
+    async def stream_urls(self, device_id: str) -> dict[int, str]:
+        """Адреса потока: {0: HD, 1: SD}; SD может не быть.
+        HLS работает для своих камер; облачный RTSP Imou ffmpeg не открывает, он только запасной."""
         try:
-            return await self._hls_url(device_id)
+            return await self._hls_urls(device_id)
         except ImouError as e:
             hls_error = e
         log.info("imou hls for %s unavailable, trying cloud rtsp: %s", device_id, hls_error)
         url = await self._cloud_rtsp(device_id)
         if url:
-            return url
+            return {0: url}
         raise hls_error
+
+    async def stream_url(self, device_id: str, sd: bool = False) -> str:
+        urls = await self.stream_urls(device_id)
+        return urls.get(1 if sd else 0) or urls[0]

@@ -150,11 +150,11 @@ def test_targets_imou(rcfg, make_cfg):
     catalog = Catalog(rcfg)
     catalog.set_imou([ImouCamera("AB12CD", "Улица", True), ImouCamera("EF34", "Сарай", False)])
     ts = {t.cam_id: t for t in targets(rcfg, catalog)}
-    assert ts["imou_ab12cd"] == RecTarget("imou_ab12cd", "Улица", "rtsp://go2rtc:8554/imou_ab12cd",
+    assert ts["imou_ab12cd"] == RecTarget("imou_ab12cd", "Улица", "rtsp://go2rtc:8554/imou_ab12cd~rec",
                                           None, copy_video=True)
     assert "imou_ef34" not in ts
     assert ts["yard"].copy_video is False
-    off = make_cfg(recording={"enabled": True})
+    off = make_cfg(recording={"enabled": True, "imou": False})
     assert all(t.cam_id != "imou_ab12cd" for t in targets(off, catalog))
 
 
@@ -165,7 +165,7 @@ async def test_imou_codec_tag_alternates_until_recording_works(rcfg, tmp_path):
 
     def tags():
         return [c[0][c[0].index("-tag:v") + 1] if "-tag:v" in c[0] else None
-                for c in env.calls if "rtsp://go2rtc:8554/imou_ab12cd" in c[0]]
+                for c in env.calls if "rtsp://go2rtc:8554/imou_ab12cd~rec" in c[0]]
 
     await env.rec.tick()
     assert tags() == ["hvc1"]

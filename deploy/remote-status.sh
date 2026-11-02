@@ -86,33 +86,6 @@ for name in sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n)):
     body = "ok" if r.status_code == 200 else r.text[:80]
     print(name, r.status_code, body)
 ' </dev/null 2>&1 | tail -n 40 | redact
-# Imou: отвечает ли каждый аккаунт (2 обращения к API на аккаунт: токен и список камер)
-echo "== imou: аккаунты"
-docker compose exec -T streemcam python - 2>&1 <<'PY' | tail -n 20 | redact
-import asyncio
-import httpx
-from streemcam.config import load_config
-from streemcam.imou.client import ImouClient
-
-
-async def main():
-    cfg = load_config("/app/config.yaml")
-    accounts = [("основной", cfg.imou.app_id, cfg.imou.app_secret, cfg.imou.api_url)]
-    accounts += [(f"доп.{i}", a.app_id, a.app_secret, a.api_url)
-                 for i, a in enumerate(cfg.imou.accounts, 1) if a.app_id and a.app_secret]
-    async with httpx.AsyncClient(timeout=20) as http:
-        for label, app_id, secret, api in accounts:
-            client = ImouClient(app_id, secret, api, http)
-            try:
-                data = await client._call("deviceBaseList", {"bindId": -1, "limit": 50,
-                                                             "type": "bindAndShare", "needApInfo": False})
-                print(label, "ok, камер", len(data.get("deviceList") or []))
-            except Exception as e:  # noqa: BLE001
-                print(label, "ошибка:", client._redact(str(e)))
-
-
-asyncio.run(main())
-PY
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
 echo "== go2rtc: последние строки"
