@@ -63,6 +63,34 @@ services:
     depends_on: [streemcam]
     restart: unless-stopped
 
+  # WireGuard-сервер: дома (роутеры-клиенты) подключаются к нему, и go2rtc видит камеры в домашних сетях
+  # напрямую, без облака. Включается профилем wireguard в COMPOSE_PROFILES; настройка — в README
+  # («Камеры в домах через WireGuard»). Ключи и конфиги роутеров создаются в ./wireguard при первом запуске.
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:latest
+    profiles: ["wireguard"]
+    network_mode: host          # туннель и маршруты к домашним сетям — на самом сервере, их видят все контейнеры
+    cap_add: [NET_ADMIN, SYS_MODULE]
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Moscow
+      SERVERURL: ${WG_SERVER_URL:-auto}     # белый IP или домен сервера; auto — определить самому
+      SERVERPORT: "51820"
+      PEERS: dom1,dom2,dom3                 # по конфигу на каждый дом: wireguard/peer_domN/peer_domN.conf
+      INTERNAL_SUBNET: 10.13.13.0
+      ALLOWEDIPS: 10.13.13.0/24             # роутеры шлют в туннель только ответы серверу, не весь интернет
+      PERSISTENTKEEPALIVE_PEERS: all        # роутеры за NAT держат туннель открытым
+      # домашняя сеть каждого дома: сервер направит её в туннель этого дома
+      SERVER_ALLOWEDIPS_PEER_dom1: ${WG_LAN_DOM1:-}
+      SERVER_ALLOWEDIPS_PEER_dom2: ${WG_LAN_DOM2:-}
+      SERVER_ALLOWEDIPS_PEER_dom3: ${WG_LAN_DOM3:-}
+    volumes:
+      - ./wireguard:/config
+      - ./deploy/wireguard/server.conf:/config/templates/server.conf:ro
+      - /lib/modules:/lib/modules:ro
+    restart: unless-stopped
+
 volumes:
   caddy_data:
   caddy_config:
