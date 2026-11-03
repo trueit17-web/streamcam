@@ -93,36 +93,36 @@ if docker compose ps --status running --services | grep -qx wireguard; then
   docker compose exec -T wireguard wg show wg0 latest-handshakes </dev/null 2>&1 \
     | awk -v now="$now" '{ if ($2 == 0) print "дом " NR ": ещё не подключался"; else print "дом " NR ": " now - $2 " с назад" }'
   docker compose logs --since "${hours}h" --no-color wireguard 2>&1 | grep -iE "error|fail|warn" | tail -n 10 | redact
-  docker compose exec -T wireguard wg show wg0 transfer </dev/null 2>&1 \
-    | awk '{ print "дом " NR ": получено " $2 " Б, отправлено " $3 " Б" }'
-  # Доступность домашних сетей через туннель: печатаем только последний октет найденных устройств
-  echo "== wireguard: устройства в домашних сетях (порты 554 RTSP / 37777 Dahua / 80)"
-  nets=$(docker compose exec -T wireguard wg show wg0 allowed-ips </dev/null 2>/dev/null \
-    | tr ' \t' '\n\n' | grep -E '^[0-9.]+/[0-9]+$' | grep -v '^10\.13\.13\.')
-  [ -n "$nets" ] || echo "домашние подсети не заданы (WG_LAN_DOMN в .env)"
-  n=0
-  for net in $nets; do
-    n=$((n + 1))
-    base=${net%.*}
-    if ! ip route get "${base}.1" 2>/dev/null | grep -q wg0; then
-      echo "сеть $n: маршрут не через туннель"; continue
-    fi
-    hits=$(
-      for i in $(seq 1 254); do
-        for port in 554 37777 80; do
-          ( timeout 0.5 bash -c "</dev/tcp/${base}.${i}/${port}" 2>/dev/null && echo ".${i}:${port}" ) </dev/null &
-        done
-        if (( i % 32 == 0 )); then wait; fi
-      done
-      wait
-    )
-    echo "сеть $n: ${hits:-ничего не отвечает}" | tr '\n' ' '; echo
-    ping -c 2 -W 1 "${base}.1" >/dev/null 2>&1 && echo "сеть $n: роутер .1 отвечает на ping" || echo "сеть $n: роутер .1 не отвечает на ping"
-    ping -c 2 -W 1 "10.13.13.$((n + 1))" >/dev/null 2>&1 && echo "дом $n: адрес в туннеле отвечает на ping" || echo "дом $n: адрес в туннеле не отвечает на ping"
+  wgx() { docker compose exec -T wireguard "$@" </dev/null 2>/dev/null; }
+  ifaces=$(wgx wg show interfaces | tr -d '\r')
+  echo "== wireguard: туннели: $ifaces"
+  for ifc in $ifaces; do
+    [ "$ifc" = wg0 ] && continue
+    now=$(date +%s)
+    wgx wg show "$ifc" latest-handshakes | awk -v now="$now" -v i="$ifc" '{ if ($2 == 0) print i ": рукопожатия ещё не было"; else print i ": рукопожатие " now - $2 " с назад" }'
   done
-  echo "== wireguard: трафик после проверки"
-  docker compose exec -T wireguard wg show wg0 transfer </dev/null 2>&1 \
-    | awk '{ print "дом " NR ": получено " $2 " Б, отправлено " $3 " Б" }'
+  # Доступность домашних сетей через туннели: печатаем только последний октет найденных устройств
+  echo "== wireguard: устройства в домашних сетях (порты 554 RTSP / 37777 Dahua / 80)"
+  for ifc in $ifaces; do
+    for net in $(wgx wg show "$ifc" allowed-ips | tr ' \t' '\n\n' | grep -E '^[0-9.]+/[0-9]+$' | grep -v '^10\.13\.13\.' | grep -v '^0\.0\.0\.0'); do
+      base=${net%.*}
+      dev=$(ip route get "${base}.1" 2>/dev/null | grep -o 'dev [^ ]*' | cut -d' ' -f2)
+      if [ "$dev" != "$ifc" ]; then
+        echo "$ifc сеть: маршрут идёт через ${dev:-нет маршрута}"; continue
+      fi
+      hits=$(
+        for i in $(seq 1 254); do
+          for port in 554 37777 80; do
+            ( timeout 0.5 bash -c "</dev/tcp/${base}.${i}/${port}" 2>/dev/null && echo ".${i}:${port}" ) </dev/null &
+          done
+          if (( i % 32 == 0 )); then wait; fi
+        done
+        wait
+      )
+      echo "$ifc сеть: ${hits:-ничего не отвечает}" | tr '\n' ' '; echo
+    done
+  done
+  docker compose logs --tail 60 --no-color wireguard 2>&1 | grep -iE "wg_confs|tunnel|dom1|error|fail|cannot|RTNETLINK" | tail -n 15 | redact
 fi
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
