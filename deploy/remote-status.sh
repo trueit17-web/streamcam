@@ -124,6 +124,15 @@ if docker compose ps --status running --services | grep -qx wireguard; then
   done
   docker compose logs --tail 60 --no-color wireguard 2>&1 | grep -iE "wg_confs|tunnel|dom1|error|fail|cannot|RTNETLINK" | tail -n 15 | redact
 fi
+# Клиентские туннели к домам: только безопасные строки (без ключей и адреса Endpoint)
+for f in wireguard/wg_confs/*.conf; do
+  [ -f "$f" ] || continue
+  [ "$(basename "$f")" = wg0.conf ] && continue
+  echo "== файл $(basename "$f")"
+  grep -iE '^\s*(Address|AllowedIPs|DNS|Table|PostUp|PostDown|PersistentKeepalive|MTU)\s*=' "$f" | sed 's/\r$//'
+  grep -iqE '^\s*Endpoint\s*=' "$f" && echo "Endpoint задан"
+done
+echo "== маршрут по умолчанию идёт через: $(ip route show default | grep -o 'dev [^ ]*' | head -1)"
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
 echo "== go2rtc: последние строки"
