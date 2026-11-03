@@ -133,6 +133,10 @@ for f in wireguard/wg_confs/*.conf; do
   grep -iqE '^\s*Endpoint\s*=' "$f" && echo "Endpoint задан"
 done
 echo "== маршрут по умолчанию идёт через: $(ip route show default | grep -o 'dev [^ ]*' | head -1)"
+echo "== маршруты сервера (публичные адреса скрыты)"
+maskpub() { sed -E 's/\b([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\b/&@/g' | perl -pe 's/(\d+)\.(\d+)\.\d+\.\d+@/($1==10||$1==127||($1==192&&$2==168)||($1==172&&$2>=16&&$2<=31)||($1==100&&$2>=64&&$2<=127)||$1==0||$1==255)?$&:"PUB"/ge; s/@//g'; }
+ip -4 route | maskpub
+ip -4 -o addr | awk '{print $2, $4}' | maskpub
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
 echo "== go2rtc: последние строки"
