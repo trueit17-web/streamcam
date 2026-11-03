@@ -13,6 +13,29 @@ hours="${2:-1}"
 redact() { sed -E 's#((https?|rtsps?)://[^/ "]+)[^ "]*#\1/***#g; s/(key|token|liveToken)=[^&" ]*/\1=***/g'; }
 failed=0
 
+# Временный тест WireGuard (с разрешения владельца): hours=99 — запуск с автооткатом, hours=98 — оставить включённым
+netcheck() {
+  h=$(curl -fsS -m 6 -o /dev/null -w ok https://api.github.com 2>/dev/null || echo FAIL)
+  c=$(docker compose exec -T streemcam python -c "import socket; socket.create_connection(('api.telegram.org',443),5); print('ok')" </dev/null 2>/dev/null | tr -d '\r' || true)
+  r=$(timeout 2 bash -c "</dev/tcp/192.168.1.1/80" 2>/dev/null && echo ok || echo FAIL)
+  echo "$(date +%T) хост→интернет: $h, контейнер→telegram: ${c:-FAIL}, роутер дома :80: $r"
+}
+if [ "$hours" = 98 ]; then
+  hours=1
+  touch /var/tmp/wg-keep
+  echo "== SSH при поднятом туннеле работает — туннель оставлен включённым"
+  netcheck
+fi
+if [ "$hours" = 99 ]; then
+  hours=1
+  rm -f /var/tmp/wg-keep
+  echo "== тест wireguard: запуск"
+  setsid nohup bash -c "sleep 420; [ -f /var/tmp/wg-keep ] && exit 0; cd '$PWD'; docker compose stop wireguard; docker run --rm --network host --cap-add NET_ADMIN --entrypoint ip lscr.io/linuxserver/wireguard:latest link del dom1" </dev/null >/dev/null 2>&1 &
+  echo "страховка: через 7 минут туннель выключится, если SSH-проверка его не подтвердит"
+  docker compose up -d wireguard </dev/null 2>&1 | tail -1
+  for k in 1 2 3 4 5 6 7 8 9; do sleep 15; netcheck; done
+  docker compose logs --since 3m --no-color wireguard 2>&1 | grep -v '█' | grep -E '\[#\]|\*\*\*\*|RTNETLINK|rror' | grep -v 'QR code' | tail -n 25 | redact
+fi
 echo "== версия: $(git rev-parse --short HEAD) ($(git log -1 --format=%cd --date=iso))"
 echo "== владелец клона: $(stat -c %U .git), ssh-пользователь: $(id -un)"
 echo "== контейнеры"
