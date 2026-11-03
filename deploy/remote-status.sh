@@ -117,7 +117,12 @@ if docker compose ps --status running --services | grep -qx wireguard; then
       wait
     )
     echo "сеть $n: ${hits:-ничего не отвечает}" | tr '\n' ' '; echo
+    ping -c 2 -W 1 "${base}.1" >/dev/null 2>&1 && echo "сеть $n: роутер .1 отвечает на ping" || echo "сеть $n: роутер .1 не отвечает на ping"
+    ping -c 2 -W 1 "10.13.13.$((n + 1))" >/dev/null 2>&1 && echo "дом $n: адрес в туннеле отвечает на ping" || echo "дом $n: адрес в туннеле не отвечает на ping"
   done
+  echo "== wireguard: трафик после проверки"
+  docker compose exec -T wireguard wg show wg0 transfer </dev/null 2>&1 \
+    | awk '{ print "дом " NR ": получено " $2 " Б, отправлено " $3 " Б" }'
 fi
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
