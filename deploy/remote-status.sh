@@ -139,8 +139,14 @@ ip -4 route | maskpub
 ip -4 -o addr | awk '{print $2, $4}' | maskpub
 if [ -r /var/tmp/wgdiag.txt ]; then
   echo "== снимок сети при поднятом туннеле (публичные адреса и ключи скрыты)"
-  maskpub < /var/tmp/wgdiag.txt | sed -E 's#[A-Za-z0-9+/]{42,43}=#KEY#g' | head -n 300
+  # без логов контейнера: там QR-коды с ключами пиров
+  sed '/^wireguard-1/d' /var/tmp/wgdiag.txt | maskpub | sed -E 's#[A-Za-z0-9+/]{42,43}=#KEY#g' | head -n 120
 fi
+echo "== DNS сервера"
+grep -E '^nameserver' /etc/resolv.conf | maskpub
+command -v resolvectl >/dev/null && resolvectl dns 2>/dev/null | maskpub
+echo "== sshd слушает"
+ss -tln | awk '$4 ~ /:22$/ {print $4}' | maskpub
 echo "== imou: строки лога за ${hours} ч"
 docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -i "imou" | grep -v "HTTP Request" | tail -n 40 | redact
 echo "== go2rtc: последние строки"
