@@ -13,29 +13,6 @@ hours="${2:-1}"
 redact() { sed -E 's#((https?|rtsps?)://[^/ "]+)[^ "]*#\1/***#g; s/(key|token|liveToken)=[^&" ]*/\1=***/g'; }
 failed=0
 
-# Временный тест WireGuard (с разрешения владельца): hours=99 — запуск с автооткатом, hours=98 — оставить включённым
-netcheck() {
-  h=$(curl -fsS -m 6 -o /dev/null -w ok https://api.github.com 2>/dev/null || echo FAIL)
-  c=$(docker compose exec -T streemcam python -c "import socket; socket.create_connection(('api.telegram.org',443),5); print('ok')" </dev/null 2>/dev/null | tr -d '\r' || true)
-  r=$(timeout 2 bash -c "</dev/tcp/192.168.1.1/80" 2>/dev/null && echo ok || echo FAIL)
-  echo "$(date +%T) хост→интернет: $h, контейнер→telegram: ${c:-FAIL}, роутер дома :80: $r"
-}
-if [ "$hours" = 98 ]; then
-  hours=1
-  touch /var/tmp/wg-keep
-  echo "== SSH при поднятом туннеле работает — туннель оставлен включённым"
-  netcheck
-fi
-if [ "$hours" = 99 ]; then
-  hours=1
-  rm -f /var/tmp/wg-keep
-  echo "== тест wireguard: запуск"
-  setsid nohup bash -c "sleep 420; [ -f /var/tmp/wg-keep ] && exit 0; cd '$PWD'; docker compose stop wireguard; docker run --rm --network host --cap-add NET_ADMIN --entrypoint ip lscr.io/linuxserver/wireguard:latest link del dom1" </dev/null >/dev/null 2>&1 &
-  echo "страховка: через 7 минут туннель выключится, если SSH-проверка его не подтвердит"
-  docker compose up -d wireguard </dev/null 2>&1 | tail -1
-  for k in 1 2 3 4 5 6 7 8 9; do sleep 15; netcheck; done
-  docker compose logs --since 3m --no-color wireguard 2>&1 | grep -v '█' | grep -E '\[#\]|\*\*\*\*|RTNETLINK|rror' | grep -v 'QR code' | tail -n 25 | redact
-fi
 echo "== версия: $(git rev-parse --short HEAD) ($(git log -1 --format=%cd --date=iso))"
 echo "== владелец клона: $(stat -c %U .git), ssh-пользователь: $(id -un)"
 echo "== контейнеры"
@@ -109,6 +86,24 @@ for name in sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n)):
     body = "ok" if r.status_code == 200 else r.text[:80]
     print(name, r.status_code, body)
 ' </dev/null 2>&1 | tail -n 40 | redact
+# P2P-туннели к камерам Imou (dh-p2p): лог уже без адресов, плюс проверка, что RTSP камеры отвечает
+if docker compose ps --status running --services | grep -qx dhp2p; then
+  echo "== p2p: последние строки"
+  docker compose logs --since "${hours}h" --no-color dhp2p 2>&1 | tail -n 15 | redact
+  echo "== p2p: ответ RTSP камер (401 — туннель работает, нужен пароль)"
+  for item in $(docker compose exec -T dhp2p printenv DHP2P_CAMERAS </dev/null 2>/dev/null | tr ',' ' '); do
+    sn=${item%%:*}; port=${item##*:}
+    ans=$(docker compose exec -T streemcam python -c "
+import socket,sys
+try:
+    s=socket.create_connection(('dhp2p',$port),10); s.settimeout(15)
+    s.sendall(b'OPTIONS rtsp://dhp2p/cam/realmonitor?channel=1&subtype=1 RTSP/1.0\r\nCSeq: 1\r\n\r\n')
+    d=s.recv(4096); print(d.split(b'\r\n')[0].decode(errors='replace') or 'пусто')
+except Exception as e: print('ошибка', type(e).__name__)
+" </dev/null 2>&1 | tail -1)
+    echo "камера …${sn: -5} (порт $port): $ans"
+  done
+fi
 # WireGuard: сколько секунд назад каждый дом выходил на связь (без ключей и адресов — лог публичный)
 if docker compose ps --status running --services | grep -qx wireguard; then
   echo "== wireguard: последнее рукопожатие по домам"
@@ -160,11 +155,6 @@ echo "== маршруты сервера (публичные адреса скр
 maskpub() { sed -E 's/\b([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\b/&@/g' | perl -pe 's/(\d+)\.(\d+)\.\d+\.\d+@/($1==10||$1==127||($1==192&&$2==168)||($1==172&&$2>=16&&$2<=31)||($1==100&&$2>=64&&$2<=127)||$1==0||$1==255)?$&:"PUB"/ge; s/@//g'; }
 ip -4 route | maskpub
 ip -4 -o addr | awk '{print $2, $4}' | maskpub
-if [ -r /var/tmp/wgdiag.txt ]; then
-  echo "== снимок сети при поднятом туннеле (публичные адреса и ключи скрыты)"
-  # без логов контейнера: там QR-коды с ключами пиров
-  sed '/^wireguard-1/d' /var/tmp/wgdiag.txt | maskpub | sed -E 's#[A-Za-z0-9+/]{42,43}=#KEY#g' | head -n 120
-fi
 echo "== DNS сервера"
 grep -E '^nameserver' /etc/resolv.conf | maskpub
 command -v resolvectl >/dev/null && resolvectl dns 2>/dev/null | maskpub

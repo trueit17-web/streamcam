@@ -63,6 +63,17 @@ services:
     depends_on: [streemcam]
     restart: unless-stopped
 
+  # P2P-туннели к камерам Imou через облако Easy4IP — как в приложении Imou Life: без роутеров, проброса
+  # портов и трафика открытой платформы. Включается профилем p2p в COMPOSE_PROFILES; камеры —
+  # DHP2P_CAMERAS в .env, в config.yaml это камеры type: dahua с host: dhp2p (README, «Камеры Imou через P2P»).
+  dhp2p:
+    build: deploy/dhp2p
+    profiles: ["p2p"]
+    environment:
+      DHP2P_CAMERAS: ${DHP2P_CAMERAS:-}   # СЕРИЙНИК:ПОРТ через пробел
+      DHP2P_RELAY: ${DHP2P_RELAY:-0}      # 1 — через relay-сервер, если прямое P2P не проходит
+    restart: unless-stopped
+
   # WireGuard-сервер: дома (роутеры-клиенты) подключаются к нему, и go2rtc видит камеры в домашних сетях
   # напрямую, без облака. Включается профилем wireguard в COMPOSE_PROFILES; настройка — в README
   # («Камеры в домах через WireGuard»). Ключи и конфиги роутеров создаются в ./wireguard при первом запуске.
