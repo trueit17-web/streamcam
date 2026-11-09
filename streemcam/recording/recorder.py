@@ -1,4 +1,5 @@
 import asyncio
+import io
 import logging
 import os
 import shutil
@@ -20,6 +21,11 @@ HEALTHY_AFTER_SECONDS = 60
 STALL_SECONDS = 60
 FRESH_SECONDS = 30
 STOP_WAIT_SECONDS = 10.0
+# Один проход по камерам занимает доли секунды. Если он висит дольше, запись встала бы для всех
+# камер сразу (так было 09.11: ни одного сообщения записи 15 минут), поэтому проход прерывается,
+# а в лог пишется, где он застрял.
+TICK_TIMEOUT_SECONDS = 90.0
+ALERT_TIMEOUT_SECONDS = 5.0   # уведомление в Telegram не должно держать запись
 
 
 def backoff(failures: int) -> float:
@@ -125,13 +131,30 @@ class Recorder:
             await asyncio.Event().wait()
         try:
             while True:
-                try:
-                    await self.tick()
-                except Exception:
-                    log.exception("recorder tick failed")
+                await self._guarded_tick()
                 await asyncio.sleep(TICK_SECONDS)
         finally:
             await self.stop_all()
+
+    async def _guarded_tick(self, timeout: float = TICK_TIMEOUT_SECONDS) -> None:
+        task = asyncio.ensure_future(self.tick())
+        try:
+            done, _ = await asyncio.wait({task}, timeout=timeout)
+        except asyncio.CancelledError:
+            task.cancel()
+            raise
+        if not done:
+            buf = io.StringIO()
+            task.print_stack(file=buf)
+            log.error("recorder tick hung for %ss, cancelling it:\n%s", timeout, buf.getvalue())
+            task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
+            return
+        if not task.cancelled() and task.exception() is not None:
+            log.error("recorder tick failed", exc_info=task.exception())
 
     async def tick(self) -> None:
         mono = self._clock()
@@ -261,6 +284,6 @@ class Recorder:
         if self._on_alert is None:
             return
         try:
-            await self._on_alert(text)
+            await asyncio.wait_for(self._on_alert(text), ALERT_TIMEOUT_SECONDS)
         except Exception:
             log.exception("recording alert failed")
