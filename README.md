@@ -19,7 +19,19 @@
 1. @BotFather → `/newbot` → токен в `TELEGRAM_BOT_TOKEN`.
 2. @BotFather → `/newapp` → выбрать бота → URL = `public_url`, short name = `mini_app_short_name`.
 3. Добавить бота админом в канал, в личке боту: `/post_channel`, закрепить пост.
-4. Команды: `/cams`, админам — `/allow <id|dc:id>`, `/deny`, `/users` (можно ответом на сообщение).
+4. Команды: `/cams`, `/web` (одноразовая ссылка на сайт в браузере), админам — `/allow <id|dc:id>`, `/deny`, `/users` (можно ответом на сообщение).
+
+## Сайт в браузере
+
+`https://<домен>/web` — камеры по домам, живое видео, записи по дням и часам, скачивание.
+Обычный адрес без ссылки в браузере тоже открывает сайт.
+
+Вход:
+- кнопка «Войти через Telegram». Один раз в @BotFather: `/setdomain` → бот → домен сайта
+  (без https://). Без этого кнопка пишет «Bot domain invalid»;
+- или ссылка из бота: `/web` в личке, одноразовая, живёт `token_ttl_minutes`.
+
+Вход держится `web_session_days` дней (по умолчанию 30). Пускает тех же, кому разрешены камеры в боте.
 
 ## Discord
 1. https://discord.com/developers → New Application → Bot → токен в `DISCORD_BOT_TOKEN`.

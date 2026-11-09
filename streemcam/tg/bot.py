@@ -58,6 +58,22 @@ class TgHandlers:
             markup = self._link_markup()
         await message.answer("Нажмите, чтобы открыть камеры:", reply_markup=markup)
 
+    async def web(self, message: Message) -> None:
+        """Одноразовая ссылка на сайт в браузере — вход без кнопки Telegram на сайте."""
+        ident = self._ident(message)
+        if ident is None:
+            return
+        if not self.access.is_allowed(ident):
+            await message.answer(f"Нет доступа. Ваш ID: {ident.user_id} — передайте его администратору.")
+            return
+        if message.chat.type != "private":
+            await message.answer("Напишите /web боту в личные сообщения: ссылка одноразовая и личная.")
+            return
+        url = f"{self.cfg.public_url.rstrip('/')}/web?t={self.access.issue_link_token(ident)}"
+        markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть сайт", url=url)]])
+        await message.answer(f"Ссылка для входа на сайт в браузере. Она одноразовая и действует "
+                             f"{self.cfg.token_ttl_minutes} мин.", reply_markup=markup)
+
     async def _require_admin(self, message: Message) -> Identity | None:
         ident = self._ident(message)
         if ident is None or not self.access.is_admin(ident):
@@ -174,6 +190,7 @@ class TgHandlers:
 def build_router(h: TgHandlers) -> Router:
     router = Router()
     router.message.register(h.cams, Command("start", "cams"))
+    router.message.register(h.web, Command("web"))
     router.message.register(h.allow, Command("allow"))
     router.message.register(h.deny, Command("deny"))
     router.message.register(h.users, Command("users"))

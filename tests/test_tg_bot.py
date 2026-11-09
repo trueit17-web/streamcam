@@ -118,3 +118,20 @@ async def test_post_channel_without_channel(make_cfg, access):
     await h.post_channel(msg)
     assert "channel_id" in text_of(msg)
     msg.bot.send_message.assert_not_called()
+
+
+async def test_web_sends_one_time_site_link(h, access):
+    msg = make_msg()
+    await h.web(msg)
+    url = button_of(msg).url
+    assert url.startswith("https://cams.example.com/web?t=")
+    assert access.redeem_link_token(url.split("t=", 1)[1]) == Identity("tg", 42)
+
+
+async def test_web_denied_and_group(h):
+    msg = make_msg(user_id=999)
+    await h.web(msg)
+    assert "Нет доступа" in text_of(msg)
+    msg = make_msg(chat_type="group")
+    await h.web(msg)
+    assert "личные" in text_of(msg)
