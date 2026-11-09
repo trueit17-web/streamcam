@@ -18,7 +18,11 @@
     <section id="login" class="center" hidden>
       <h1>Камеры</h1>
       <p class="muted">Войдите через Telegram, чтобы смотреть камеры и записи.</p>
-      <div id="tg-widget"></div>
+      <button id="tg-login" class="big">Войти через Telegram</button>
+      <div id="tg-wait" hidden>
+        <p>Откроется Telegram. Нажмите там <b>«Начать»</b> (Start) в чате с ботом, вход произойдёт сам.</p>
+        <p class="muted small">Не открылось? <a id="tg-link" target="_blank" rel="noopener">Открыть чат с ботом</a></p>
+      </div>
       <p class="muted small" id="login-alt">Или напишите боту <b>/web</b> и откройте присланную ссылку.</p>
       <p class="error" id="login-error" hidden></p>
     </section>

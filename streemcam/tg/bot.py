@@ -15,6 +15,7 @@ from ..tuya.qr import qr_png
 log = logging.getLogger(__name__)
 
 BUTTON_TEXT = "📹 Камеры"
+WEB_LOGIN_PREFIX = "login_"  # /start login_<код> — вход на сайт из приложения Telegram
 
 TUYA_USAGE = ("Использование: /tuya_login <код пользователя>. Код — в приложении Smart Life/Tuya Smart: "
               "«Я» → ⚙ Настройки → «Аккаунт и безопасность» → «Код пользователя».")
@@ -44,9 +45,13 @@ class TgHandlers:
         return InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text=BUTTON_TEXT, url=self.mini_app_link)]])
 
-    async def cams(self, message: Message) -> None:
+    async def cams(self, message: Message, command: CommandObject | None = None) -> None:
         ident = self._ident(message)
         if ident is None:
+            return
+        args = (command.args or "") if command is not None else ""
+        if args.startswith(WEB_LOGIN_PREFIX):
+            await self._web_login(message, ident, args[len(WEB_LOGIN_PREFIX):])
             return
         if not self.access.is_allowed(ident):
             await message.answer(f"Нет доступа. Ваш ID: {ident.user_id} — передайте его администратору.")
@@ -57,6 +62,15 @@ class TgHandlers:
         else:
             markup = self._link_markup()
         await message.answer("Нажмите, чтобы открыть камеры:", reply_markup=markup)
+
+    async def _web_login(self, message: Message, ident: Identity, code: str) -> None:
+        if not self.access.is_allowed(ident):
+            await message.answer(f"Нет доступа. Ваш ID: {ident.user_id} — передайте его администратору.")
+            return
+        if self.access.confirm_web_login(code, ident):
+            await message.answer("✅ Вход на сайт подтверждён. Вернитесь в браузер.")
+        else:
+            await message.answer("Код входа устарел. Нажмите «Войти через Telegram» на сайте ещё раз.")
 
     async def web(self, message: Message) -> None:
         """Одноразовая ссылка на сайт в браузере — вход без кнопки Telegram на сайте."""

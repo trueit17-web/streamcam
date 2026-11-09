@@ -23,6 +23,8 @@ class Access:
         self.store = store
         self.registry = registry
         self._clock = clock
+        # вход на сайт через приложение Telegram: код -> [срок, Identity или None, пока бот не подтвердил]
+        self._web_logins: dict[str, list] = {}
         for platform in ("tg", "dc"):
             for uid in cfg.allow.ids(platform):
                 store.add_allowed(Identity(platform, uid), None)
@@ -79,6 +81,35 @@ class Access:
         if not bot_token:
             raise TgAuthError("telegram bot is not configured")
         return self._require_allowed(verify_login_widget(fields, bot_token, now=self._clock()))
+
+    WEB_LOGIN_TTL = 300
+
+    def start_web_login(self) -> str:
+        now = self._clock()
+        self._web_logins = {k: v for k, v in self._web_logins.items() if v[0] > now}
+        code = secrets.token_urlsafe(16)
+        self._web_logins[code] = [now + self.WEB_LOGIN_TTL, None]
+        return code
+
+    def confirm_web_login(self, code: str, ident: Identity) -> bool:
+        """Бот получил /start login_<code> от пользователя: привязываем код к нему."""
+        entry = self._web_logins.get(code)
+        if entry is None or entry[0] <= self._clock() or entry[1] is not None:
+            return False
+        self._require_allowed(ident)
+        entry[1] = ident
+        return True
+
+    def poll_web_login(self, code: str) -> Identity | None:
+        """None — ещё ждём; Identity — подтверждено (код больше не действует); TokenError — код неизвестен или истёк."""
+        entry = self._web_logins.get(code)
+        if entry is None or entry[0] <= self._clock():
+            self._web_logins.pop(code, None)
+            raise TokenError("unknown or expired login code")
+        if entry[1] is None:
+            return None
+        del self._web_logins[code]
+        return entry[1]
 
     def _require_allowed(self, ident: Identity) -> Identity:
         if not self.is_allowed(ident):
