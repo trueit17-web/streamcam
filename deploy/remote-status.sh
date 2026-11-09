@@ -89,7 +89,7 @@ for name in sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n)):
 # P2P-туннели к камерам Imou (dh-p2p): лог уже без адресов, плюс проверка, что RTSP камеры отвечает
 if docker compose ps --status running --services | grep -qx dhp2p; then
   echo "== p2p: последние строки"
-  docker compose logs --since "${hours}h" --no-color dhp2p 2>&1 | tail -n 15 | redact
+  docker compose logs --since "${hours}h" --no-color dhp2p 2>&1 | tail -n 80 | redact
   # RTSP-запрос сюда не шлём: каждое новое подключение перезапускает P2P-сессию и рвёт запись.
   # Вместо этого — кадр go2rtc по камерам, чей источник идёт через dhp2p (имена потоков, без адресов)
   echo "== p2p: кадры камер через dhp2p (go2rtc /api/frame.jpeg)"

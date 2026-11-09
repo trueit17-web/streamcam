@@ -1,0 +1,211 @@
+diff --git a/src/main.rs b/src/main.rs
+index 5798cbf..7c8a4fb 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -53,15 +53,15 @@ async fn main() {
+         _ => panic!("Invalid port specification"),
+     };
+ 
+-    // Bind the listener to the address
+-    let listener = TcpListener::bind(format!("{}:{}", bind_address, bind_port))
+-        .await
+-        .unwrap();
+-
+     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+ 
+     let (socket, session) = p2p_handshake(socket, serial, args.relay).await;
+ 
++    // Bind the listener only after the P2P session is up, so clients are refused instead of queueing
++    let listener = TcpListener::bind(format!("{}:{}", bind_address, bind_port))
++        .await
++        .unwrap();
++
+     let (dh_tx, dh_rx) = mpsc::channel::<PTCPEvent>(128);
+     let session = Arc::new(Mutex::new(session));
+ 
+diff --git a/src/process.rs b/src/process.rs
+index ae5cec4..2de4e9e 100644
+--- a/src/process.rs
++++ b/src/process.rs
+@@ -18,7 +18,13 @@ pub async fn process_writer(
+     mut rx: mpsc::Receiver<Vec<u8>>,
+ ) {
+     loop {
+-        let data = rx.recv().await.unwrap();
++        let data = match rx.recv().await {
++            Some(d) => d,
++            None => {
++                println!("Writer: realm closed by device.");
++                break;
++            }
++        };
+         if writer.write_all(&data).await.is_err() {
+             println!("Writer: Socket closed by peer.");
+             break;
+@@ -114,32 +120,43 @@ pub async fn dh_reader(
+ ) {
+     loop {
+         let packet = socket.ptcp_read().await;
+-        let packet = session.lock().unwrap().recv(packet);
++        let has_data = !matches!(packet.body, PTCPBody::Empty);
++        let packet = session.lock().unwrap().recv_in_order(packet);
+ 
+-        if let PTCPBody::Empty = packet.body {
+-            continue;
++        // every packet with data is acknowledged, also a dropped one: the ACK carries the byte
++        // count received in order, so the device retransmits what is missing
++        if has_data {
++            let p = session.lock().unwrap().send(PTCPBody::Empty);
++            socket.ptcp_request(p).await;
+         }
+ 
+-        let p = session.lock().unwrap().send(PTCPBody::Empty);
+-        socket.ptcp_request(p).await;
++        let packet = match packet {
++            Some(p) => p,
++            None => continue,
++        };
+ 
+         match packet.body {
+             PTCPBody::Status(realm, status) => {
++                let status = status.trim_end_matches('\0').to_string();
+                 if status == "CONN" {
+-                    conn_channels
+-                        .lock()
+-                        .unwrap()
+-                        .remove(&realm)
+-                        .unwrap()
+-                        .send(true)
+-                        .unwrap();
++                    if let Some(tx) = conn_channels.lock().unwrap().remove(&realm) {
++                        let _ = tx.send(true);
++                    }
++                } else if status == "DISC" {
++                    // the device closed this realm: dropping its sender closes the client socket
++                    channels.lock().unwrap().remove(&realm);
++                    println!("Realm {:08x} closed by device", realm);
+                 }
+             }
+             PTCPBody::Payload(p) => {
+-                let tx = channels.lock().unwrap().get(&p.realm).unwrap().clone();
+-
+-                if tx.send(p.data).await.is_err() {
+-                    println!("Realm {:08x} unavailable", p.realm);
++                let tx = channels.lock().unwrap().get(&p.realm).cloned();
++                match tx {
++                    Some(tx) => {
++                        if tx.send(p.data).await.is_err() {
++                            println!("Realm {:08x} unavailable", p.realm);
++                        }
++                    }
++                    None => println!("Realm {:08x} unknown", p.realm),
+                 }
+             }
+             _ => {}
+diff --git a/src/ptcp.rs b/src/ptcp.rs
+index 660b5be..a109ca3 100644
+--- a/src/ptcp.rs
++++ b/src/ptcp.rs
+@@ -25,7 +25,7 @@ pub enum PTCPBody {
+ }
+ 
+ pub struct PTCPPacket {
+-    sent: u32,
++    pub sent: u32,
+     recv: u32,
+     pid: u32,
+     lmid: u32,
+@@ -170,6 +170,18 @@ impl PTCPBody {
+         }
+     }
+ 
++    pub fn kind(&self) -> String {
++        match self {
++            PTCPBody::Sync => "sync".into(),
++            PTCPBody::Command(d) => format!("cmd/{}", d.len()),
++            PTCPBody::Payload(p) => format!("data/{}", p.data.len()),
++            PTCPBody::Bind(_, port) => format!("bind:{}", port),
++            PTCPBody::Status(_, st) => format!("status:{}", st.trim_end_matches('\0')),
++            PTCPBody::Heartbeat => "hb".into(),
++            PTCPBody::Empty => "ack".into(),
++        }
++    }
++
+     fn len(&self) -> usize {
+         match self {
+             PTCPBody::Sync => 4,
+@@ -287,6 +299,23 @@ impl PTCPSession {
+ 
+         packet
+     }
++
++    /// Like recv, but accepts a packet with data only when it continues the stream exactly
++    /// (packet.sent == bytes received so far). Duplicates (retransmits) and packets after a gap
++    /// return None and do not move the counters, so the next ACK tells the device what is missing.
++    pub fn recv_in_order(&mut self, packet: PTCPPacket) -> Option<PTCPPacket> {
++        let len = packet.body.len() as u32;
++        if len > 0 && packet.sent != self.recv {
++            dbg_log(&format!(
++                "drop sent={} expected={} len={}",
++                packet.sent, self.recv, len
++            ));
++            return None;
++        }
++        self.recv += len;
++        self.rmid = packet.lmid;
++        Some(packet)
++    }
+ }
+ 
+ #[async_trait]
+@@ -298,6 +327,10 @@ pub trait PTCP {
+ #[async_trait]
+ impl PTCP for UdpSocket {
+     async fn ptcp_request(&self, packet: PTCPPacket) {
++        dbg_log(&format!(
++            "out sent={} recv={} lmid={} rmid={} body={}",
++            packet.sent, packet.recv, packet.lmid, packet.rmid, packet.body.kind()
++        ));
+         println!(">>> {}", self.peer_addr().unwrap());
+         println!("{:?}", packet);
+         packet.try_print_data();
+@@ -310,11 +343,21 @@ impl PTCP for UdpSocket {
+     async fn ptcp_read(&self) -> PTCPPacket {
+         println!("### {}", self.peer_addr().unwrap());
+ 
+-        let mut buf = [0u8; 4096];
+-        let n = self.recv(&mut buf).await.unwrap();
++        let mut buf = vec![0u8; 65536];
++        let n = loop {
++            let n = self.recv(&mut buf).await.unwrap();
++            if n >= 24 && &buf[0..4] == b"PTCP" {
++                break n;
++            }
++            dbg_log(&format!("skip non-PTCP datagram len={}", n));
++        };
+ 
+         println!("<<< {}", self.peer_addr().unwrap());
+         let packet = PTCPPacket::parse(&buf[0..n]);
++        dbg_log(&format!(
++            "in  sent={} recv={} lmid={} rmid={} body={}",
++            packet.sent, packet.recv, packet.lmid, packet.rmid, packet.body.kind()
++        ));
+         println!("{:?}", packet);
+         packet.try_print_data();
+         println!("---");
+@@ -322,3 +365,15 @@ impl PTCP for UdpSocket {
+         packet
+     }
+ }
++
++/// Debug line without addresses or payload, enabled by DHP2P_DEBUG=1 (prefix "DBG ").
++/// Only the first 300 lines per process, so a video stream does not flood the log.
++pub fn dbg_log(msg: &str) {
++    use std::sync::atomic::{AtomicUsize, Ordering};
++    static COUNT: AtomicUsize = AtomicUsize::new(0);
++    if std::env::var("DHP2P_DEBUG").map(|v| v == "1").unwrap_or(false)
++        && COUNT.fetch_add(1, Ordering::Relaxed) < 300
++    {
++        println!("DBG {}", msg);
++    }
++}
