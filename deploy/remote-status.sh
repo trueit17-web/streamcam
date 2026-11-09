@@ -101,6 +101,14 @@ for name, st in streams.items():
         print(name)' </dev/null 2>/dev/null | tr -d '\r'); do
     echo "$src: $(curl -sS -m 25 -o /dev/null -w "%{http_code} %{size_download}" "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)"
   done
+  echo "== p2p: запись (последний файл: размер, сколько секунд назад менялся)"
+  now=$(date +%s)
+  for d in recordings/p2p_*/; do
+    [ -d "$d" ] || continue
+    f=$(find "$d" -type f -name '*.mp4' -printf '%T@ %s\n' 2>/dev/null | sort -n | tail -n 1)
+    if [ -z "$f" ]; then echo "$(basename "$d"): файлов нет"; continue; fi
+    echo "$(basename "$d"): $(echo "$f" | awk -v now="$now" '{ printf "%d КБ, %d с назад", $2/1024, now-$1 }')"
+  done
 fi
 # WireGuard: сколько секунд назад каждый дом выходил на связь (без ключей и адресов — лог публичный)
 if docker compose ps --status running --services | grep -qx wireguard; then
