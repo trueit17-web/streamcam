@@ -123,3 +123,14 @@ def test_rec_stream_name_imou(cfg, make_cfg):
     imou = CameraInfo("imou_ab12cd", "Улица", "imou", device_id="AB12CD")
     assert rec_stream_name(cfg, imou) == "imou_ab12cd~rec"
     assert rec_stream_name(make_cfg(recording={"imou": False}), imou) is None
+
+
+def test_dahua_via_p2p_tunnel_gets_longer_timeout(make_cfg, base_data):
+    cams = base_data["cameras"]
+    cams[1]["host"] = "dhp2p"
+    cams[1]["port"] = 1601
+    cfg = make_cfg(cameras=cams)
+    assert stream_url(cfg.camera("gate")) == (
+        "rtsp://admin:p%40ss%3Aw%2Frd@dhp2p:1601/cam/realmonitor?channel=1&subtype=1#timeout=30"
+    )
+    assert render(cfg, None)["streams"]["gate~rec"] == "rtsp://127.0.0.1:8554/gate"

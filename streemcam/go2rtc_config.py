@@ -37,6 +37,9 @@ def tuya_compat_src(cam_id: str) -> str:
     return f"ffmpeg:{tuya_http_input(cam_id)}#video=h264#width=1280#audio=aac#raw=-af {TUYA_AUDIO_FILTER}"
 
 
+P2P_HOST = "dhp2p"  # сервис P2P-туннелей к камерам Imou в docker-compose
+
+
 def rec_stream_name(cfg: Config, cam: CameraInfo) -> str | None:
     if cam.kind == "tuya":
         return cam.id if cfg.recording.tuya else None
@@ -58,8 +61,10 @@ def stream_url(cam, subtype: int | None = None) -> str:
             user = quote(cam.user, safe="")
             password = quote(cam.password, safe="")
             sub = subtype if subtype is not None else cam.subtype
-            return (f"rtsp://{user}:{password}@{cam.host}:{cam.port}"
-                    f"/cam/realmonitor?channel={cam.channel}&subtype={sub}")
+            url = (f"rtsp://{user}:{password}@{cam.host}:{cam.port}"
+                   f"/cam/realmonitor?channel={cam.channel}&subtype={sub}")
+            # через P2P-туннель (сервис dhp2p) ответ идёт через облачный relay: 5 с go2rtc по умолчанию мало
+            return url + "#timeout=30" if cam.host == P2P_HOST else url
         case XiaomiCamera():
             query = {"did": cam.did, "model": cam.model}
             sub = subtype if subtype is not None else cam.subtype
