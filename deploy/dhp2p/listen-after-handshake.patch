@@ -1,0 +1,25 @@
+diff --git a/src/main.rs b/src/main.rs
+index 5798cbf..7c8a4fb 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -53,15 +53,15 @@ async fn main() {
+         _ => panic!("Invalid port specification"),
+     };
+ 
+-    // Bind the listener to the address
+-    let listener = TcpListener::bind(format!("{}:{}", bind_address, bind_port))
+-        .await
+-        .unwrap();
+-
+     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+ 
+     let (socket, session) = p2p_handshake(socket, serial, args.relay).await;
+ 
++    // Bind the listener only after the P2P session is up, so clients are refused instead of queueing
++    let listener = TcpListener::bind(format!("{}:{}", bind_address, bind_port))
++        .await
++        .unwrap();
++
+     let (dh_tx, dh_rx) = mpsc::channel::<PTCPEvent>(128);
+     let session = Arc::new(Mutex::new(session));
+ 
