@@ -21,7 +21,7 @@ tunnel() {
       (( rc == 0 )) || break
       case "$line" in
         *"Ready to connect"*) wait_s=86400 ;;&
-        *"PTCP session established"*|*"Ready to connect"*|*Timeout*|*"requires authentication"*|*panicked*|*"Error response"*|*"called \`"*)
+        "DBG "*|*"closed by device"*|*unknown*|*"PTCP session established"*|*"Ready to connect"*|*Timeout*|*"requires authentication"*|*panicked*|*"Error response"*|*"called \`"*)
           echo "$tag: ${line}" | sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}(:[0-9]+)?/IP/g' ;;
         # P2P-сессия dh-p2p обслуживает одно RTSP-подключение: после его закрытия новые не получают
         # ответа, поэтому туннель перезапускается, и go2rtc переподключается к свежей сессии
