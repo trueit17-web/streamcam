@@ -56,7 +56,7 @@ def test_web_page_and_config(make_web, cfg):
     assert "/static/web.js?v=" in html and "/static/web.css?v=" in html
     assert client.get("/api/web/config").json() == {"bot": "cams_bot"}
     js = client.get("/static/web.js").text
-    assert "/api/tg/widget" in js and "download" in js
+    assert "tg://resolve" in js and "download" in js
 
 
 def test_web_config_without_bot(web):
@@ -69,3 +69,24 @@ def test_link_redeem_for_web_is_long(web, cfg):
     r = client.post("/api/link/redeem?web=1", json={"t": t})
     payload = verify(r.json()["token"], cfg.secret, "session")
     assert payload["exp"] - time.time() > 86400 * 2
+
+
+def test_login_via_telegram_app(make_web, cfg):
+    async def username():
+        return "cams_bot"
+    web = make_web(cfg)
+    client = TestClient(web.make_app(tg_username=username))
+    start = client.post("/api/web/login").json()
+    assert start["bot"] == "cams_bot"
+    code = start["code"]
+    assert client.get(f"/api/web/login/{code}").json() == {"status": "pending"}
+    assert web.access.confirm_web_login(code, Identity("tg", 42))
+    r = client.get(f"/api/web/login/{code}")
+    payload = verify(r.json()["token"], cfg.secret, "session")
+    assert payload["u"] == 42 and payload["exp"] - time.time() > 86400 * 2
+    assert client.get(f"/api/web/login/{code}").status_code == 410  # одноразовый
+    assert client.get("/api/web/login/unknown").status_code == 410
+
+
+def test_login_without_bot_is_503(web):
+    assert TestClient(web.app).post("/api/web/login").status_code == 503

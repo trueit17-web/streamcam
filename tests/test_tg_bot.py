@@ -135,3 +135,22 @@ async def test_web_denied_and_group(h):
     msg = make_msg(chat_type="group")
     await h.web(msg)
     assert "личные" in text_of(msg)
+
+
+async def test_start_login_confirms_site_login(h, access):
+    code = access.start_web_login()
+    msg = make_msg()
+    await h.cams(msg, cmd("start", f"login_{code}"))
+    assert "подтверждён" in text_of(msg)
+    assert access.poll_web_login(code) == Identity("tg", 42)
+    msg = make_msg()
+    await h.cams(msg, cmd("start", "login_bad"))
+    assert "устарел" in text_of(msg)
+
+
+async def test_start_login_denied_user(h, access):
+    code = access.start_web_login()
+    msg = make_msg(user_id=999)
+    await h.cams(msg, cmd("start", f"login_{code}"))
+    assert "Нет доступа" in text_of(msg)
+    assert access.poll_web_login(code) is None

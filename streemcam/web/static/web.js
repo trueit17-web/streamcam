@@ -54,35 +54,55 @@ async function finishLogin(r) {
   if (r.status === 403) {
     showLogin(`Нет доступа. Ваш Telegram ID: ${data.user_id}. Передайте его администратору.`);
   } else {
-    showLogin("Ссылка устарела или уже использована. Напишите боту /web, чтобы получить новую.");
+    showLogin("Ссылка или код входа устарели. Войдите ещё раз.");
   }
   return false;
 }
 
-window.onTelegramAuth = async (user) => {
-  const r = await api("/api/tg/widget", { method: "POST", body: JSON.stringify(user) });
-  if (await finishLogin(r)) start();
-};
+let loginPoll = null;
 
-async function showLogin(error) {
+async function telegramLogin() {
+  const btn = $("#tg-login");
+  btn.disabled = true;
+  clearInterval(loginPoll);
+  const r = await fetch("/api/web/login", { method: "POST" }).catch(() => null);
+  btn.disabled = false;
+  if (!r || !r.ok) {
+    showLogin("Бот сейчас недоступен. Напишите ему /web или попробуйте позже.");
+    return;
+  }
+  const { code, bot, ttl } = await r.json();
+  const start = `login_${code}`;
+  // tg:// открывает установленное приложение Telegram сразу, без входа по номеру телефона в браузере
+  $("#tg-link").href = `https://t.me/${bot}?start=${start}`;
+  $("#tg-wait").hidden = false;
+  $("#login-error").hidden = true;
+  location.href = `tg://resolve?domain=${bot}&start=${start}`;
+  const until = Date.now() + ttl * 1000;
+  loginPoll = setInterval(async () => {
+    if (Date.now() > until) {
+      clearInterval(loginPoll);
+      $("#tg-wait").hidden = true;
+      showLogin("Время ожидания вышло. Нажмите «Войти через Telegram» ещё раз.");
+      return;
+    }
+    const p = await fetch(`/api/web/login/${encodeURIComponent(code)}`).catch(() => null);
+    if (!p || p.status === 200 && (await p.clone().json()).status === "pending") return;
+    clearInterval(loginPoll);
+    $("#tg-wait").hidden = true;
+    if (await finishLogin(p)) start_();
+  }, 2000);
+}
+
+$("#tg-login").onclick = telegramLogin;
+
+function showLogin(error) {
   stopPlayers(document);
   $("#homes").replaceChildren();
   $("#logout").hidden = true;
   show("#login");
   $("#login-error").hidden = !error;
   if (error) $("#login-error").textContent = error;
-  if ($("#tg-widget").childElementCount) return;
-  const cfg = await fetch("/api/web/config").then((r) => r.json()).catch(() => ({}));
-  if (!cfg.bot) return;
-  const s = document.createElement("script");
-  s.async = true;
-  s.src = "https://telegram.org/js/telegram-widget.js?22";
-  s.dataset.telegramLogin = cfg.bot;
-  s.dataset.size = "large";
-  s.dataset.radius = "10";
-  s.dataset.onauth = "onTelegramAuth(user)";
-  s.dataset.requestAccess = "write";
-  $("#tg-widget").append(s);
 }
 
 async function login() {
@@ -386,7 +406,7 @@ async function renderArchive(cam) {
 
 // ---------- старт ----------
 
-async function start() {
+async function start_() {
   if (!(await loadCameras())) return;
   if (!info.cameras.length) {
     message("Камер пока нет.");
@@ -395,4 +415,4 @@ async function start() {
   route();
 }
 
-if (await login()) start();
+if (await login()) start_();

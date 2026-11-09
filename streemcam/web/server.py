@@ -190,6 +190,24 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
                 log.warning("cannot get telegram bot username: %s", e)
         return {"bot": username}
 
+    @app.post("/api/web/login")
+    async def web_login_start():
+        username = await tg_username() if tg_username is not None else None
+        if not username:
+            raise HTTPException(503, "telegram bot unavailable")
+        code = access.start_web_login()
+        return {"code": code, "bot": username, "ttl": access.WEB_LOGIN_TTL}
+
+    @app.get("/api/web/login/{code}")
+    async def web_login_poll(code: str):
+        try:
+            ident = access.poll_web_login(code)
+        except TokenError:
+            return JSONResponse({"error": "expired"}, status_code=410)
+        if ident is None:
+            return {"status": "pending"}
+        return {"token": access.issue_session(ident, cfg.web_session_days * 24)}
+
     @app.post("/api/tg/widget")
     async def tg_widget(body: dict):
         try:
