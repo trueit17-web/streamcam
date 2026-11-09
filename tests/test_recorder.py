@@ -344,3 +344,44 @@ async def test_camera_error_does_not_stop_others(make_cfg, tmp_path):
     assert st.proc is None
     assert st.failures == 1
     assert st.next_start == mono["v"] + backoff(1)
+
+
+async def test_hung_tick_is_cancelled_and_logged(rcfg, caplog):
+    env = Env(rcfg, Catalog(rcfg))
+    calls = []
+
+    async def hang():
+        calls.append(1)
+        if len(calls) == 1:
+            await asyncio.Event().wait()
+
+    env.rec.tick = hang
+    await env.rec._guarded_tick(timeout=0.05)
+    assert "recorder tick hung" in caplog.text and "hang" in caplog.text
+    await env.rec._guarded_tick(timeout=0.05)   # следующий проход идёт как обычно
+    assert len(calls) == 2
+
+
+async def test_failing_tick_is_logged(rcfg, caplog):
+    env = Env(rcfg, Catalog(rcfg))
+
+    async def boom():
+        raise RuntimeError("boom")
+
+    env.rec.tick = boom
+    await env.rec._guarded_tick(timeout=1)
+    assert "recorder tick failed" in caplog.text
+
+
+async def test_slow_alert_does_not_block(make_cfg, tmp_path, monkeypatch):
+    from streemcam.recording import recorder as rec_mod
+    monkeypatch.setattr(rec_mod, "ALERT_TIMEOUT_SECONDS", 0.05)
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path)},
+                   cameras=[{"id": "yard", "name": "Двор", "type": "rtsp", "url": "rtsp://x"}])
+    env = Env(cfg, Catalog(cfg))
+
+    async def stuck(text):
+        await asyncio.Event().wait()
+
+    env.rec._on_alert = stuck
+    await asyncio.wait_for(env.rec._alert("x"), 1)
