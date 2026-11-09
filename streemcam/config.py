@@ -40,6 +40,22 @@ class DahuaCamera(BaseModel):
     record: bool = True
 
 
+class TapoCamera(BaseModel):
+    """TP-Link Tapo по RTSP. Логин и пароль — «Учётная запись камеры» из приложения Tapo
+    (Настройки камеры → Расширенные настройки), не пароль от аккаунта TP-Link."""
+    type: Literal["tapo"]
+    id: str = Field(pattern=CAMERA_ID)
+    name: str
+    home: str | None = None  # группа «дом» в списке камер
+    host: str
+    port: int = 554
+    user: str
+    password: str
+    stream: Literal[1, 2] = 1  # просмотр: 1 — высокое качество, 2 — низкое
+    record: bool = True
+    record_stream: Literal[1, 2] = 2  # запись: по умолчанию низкое качество, меньше места и трафика
+
+
 class XiaomiCamera(BaseModel):
     type: Literal["xiaomi"]
     id: str = Field(pattern=CAMERA_ID)
@@ -55,7 +71,7 @@ class XiaomiCamera(BaseModel):
     record_subtype: int = 1
 
 
-Camera = Annotated[Union[RtspCamera, DahuaCamera, XiaomiCamera], Field(discriminator="type")]
+Camera = Annotated[Union[RtspCamera, DahuaCamera, TapoCamera, XiaomiCamera], Field(discriminator="type")]
 
 
 class UserLists(BaseModel):
@@ -132,7 +148,7 @@ class ImouConfig(BaseModel):
 
 class RecordingConfig(BaseModel):
     enabled: bool = False
-    timezone: str = "Europe/Moscow"
+    timezone: str = "Europe/Kyiv"
     start: str = "08:00"
     end: str = "19:00"
     retention_days: int = 14

@@ -121,7 +121,7 @@ def test_config_camera_id_cannot_start_with_tuya(make_cfg, base_data):
 
 def test_recording_defaults(cfg):
     r = cfg.recording
-    assert (r.enabled, r.timezone, r.start, r.end) == (False, "Europe/Moscow", "08:00", "19:00")
+    assert (r.enabled, r.timezone, r.start, r.end) == (False, "Europe/Kyiv", "08:00", "19:00")
     assert (r.retention_days, r.min_free_gb, r.path) == (14, 15, "recordings")
     assert (r.rtsp_url, r.tuya, r.alert_minutes) == ("rtsp://127.0.0.1:8554", True, 10)
     assert all(c.record for c in cfg.cameras)
