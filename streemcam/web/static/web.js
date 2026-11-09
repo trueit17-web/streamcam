@@ -186,6 +186,7 @@ function go(next, replace = false) {
 window.addEventListener("popstate", route);
 
 function route() {
+  if (!info) return; // ещё не вошли — на экране вход
   readHash();
   stopPlayers(document);
   clearInterval(snapshotTimer);
@@ -210,6 +211,80 @@ function livePlayer(cam) {
   mute();
   requestAnimationFrame(mute);
   return v;
+}
+
+const ICONS = {
+  muted: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9l5 6M21 9l-5 6" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round"/></svg>',
+  sound: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round"/></svg>',
+  full: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round"/></svg>',
+  exit: '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round"/></svg>',
+};
+
+function isFullscreen() {
+  return Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+}
+
+// Во весь экран: сам блок с видео; iPhone умеет только сам <video>.
+function toggleFullscreen(box, player) {
+  if (isFullscreen()) {
+    (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+  } else if (box.requestFullscreen || box.webkitRequestFullscreen) {
+    (box.requestFullscreen || box.webkitRequestFullscreen).call(box);
+  } else {
+    player.video?.webkitEnterFullscreen?.();
+  }
+}
+
+// Панель живого видео: звук (вкл/выкл и громкость) и «во весь экран».
+function liveControls(box, player) {
+  const bar = document.createElement("div");
+  bar.className = "controls";
+  const mute = document.createElement("button");
+  mute.title = "Звук";
+  const volume = document.createElement("input");
+  volume.type = "range";
+  volume.min = "0";
+  volume.max = "1";
+  volume.step = "0.05";
+  volume.value = "1";
+  volume.title = "Громкость";
+  const spacer = document.createElement("span");
+  spacer.className = "spacer";
+  const full = document.createElement("button");
+  full.title = "Во весь экран";
+  const sync = () => {
+    const v = player.video;
+    const muted = !v || v.muted || v.volume === 0;
+    mute.innerHTML = muted ? ICONS.muted : ICONS.sound;
+    full.innerHTML = isFullscreen() ? ICONS.exit : ICONS.full;
+    if (v && !v.muted) volume.value = String(v.volume);
+    if (v && v.muted) volume.value = "0";
+  };
+  mute.onclick = (e) => {
+    e.stopPropagation();
+    const v = player.video;
+    if (!v) return;
+    v.muted = !v.muted;
+    if (!v.muted && v.volume === 0) v.volume = 1;
+    sync();
+  };
+  volume.oninput = (e) => {
+    e.stopPropagation();
+    const v = player.video;
+    if (!v) return;
+    v.volume = Number(volume.value);
+    v.muted = v.volume === 0;
+    sync();
+  };
+  full.onclick = (e) => { e.stopPropagation(); toggleFullscreen(box, player); };
+  if (box.classList.contains("stage")) box.ondblclick = () => toggleFullscreen(box, player);
+  document.addEventListener("fullscreenchange", sync);
+  document.addEventListener("webkitfullscreenchange", sync);
+  bar.append(mute, volume, spacer, full);
+  sync();
+  setTimeout(sync, 300); // <video> внутри плеера появляется чуть позже
+
+  return bar;
 }
 
 function placeholder(text) {
@@ -247,7 +322,8 @@ function tile(cam, live) {
   const media = document.createElement("div");
   media.className = "media";
   if (live && cam.online !== false) {
-    media.append(livePlayer(cam));
+    const v = livePlayer(cam);
+    media.append(v, liveControls(media, v));
   } else {
     const img = document.createElement("img");
     img.alt = "";
@@ -320,7 +396,12 @@ function renderCam(cam) {
   document.title = `${cam.name} · Камеры`;
   const stage = $("#stage");
   if (!archive) {
-    stage.replaceChildren(cam.online === false ? placeholder("Камера офлайн") : livePlayer(cam));
+    if (cam.online === false) {
+      stage.replaceChildren(placeholder("Камера офлайн"));
+    } else {
+      const v = livePlayer(cam);
+      stage.replaceChildren(v, liveControls(stage, v));
+    }
     return;
   }
   stage.replaceChildren(placeholder("Выберите час на шкале ниже"));

@@ -72,6 +72,21 @@ main { max-width: 1400px; margin: 0 auto; padding: 20px 24px 40px; }
 .stage { background: #000; border-radius: var(--radius); overflow: hidden; aspect-ratio: 16 / 9; max-height: 72vh; width: 100%; display: grid; place-items: center; position: relative; }
 .stage video-stream, .stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .stage .placeholder { color: var(--muted); }
+.controls {
+  position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 8px;
+  padding: 24px 12px 10px; background: linear-gradient(transparent, rgba(0,0,0,.65));
+  opacity: 0; transition: opacity .2s; color: #fff;
+}
+.stage:hover .controls, .media:hover .controls, .controls:focus-within, :fullscreen .controls { opacity: 1; }
+@media (hover: none) { .controls { opacity: 1; } }
+.controls button { background: transparent; color: #fff; padding: 6px; border-radius: 8px; line-height: 0; }
+.controls button:hover { background: rgba(255,255,255,.15); }
+.controls svg { width: 22px; height: 22px; fill: currentColor; }
+.controls input[type=range] { width: 90px; accent-color: #fff; }
+.media .controls { padding: 16px 8px 6px; }
+.media .controls input[type=range] { display: none; }
+:fullscreen, :-webkit-full-screen { background: #000; display: grid; place-items: center; }
+:fullscreen video-stream, :fullscreen video { width: 100%; height: 100%; object-fit: contain; }
 .tabs { display: flex; background: var(--panel); border-radius: 10px; padding: 3px; border: 1px solid var(--line); }
 .tabs button { background: transparent; color: var(--muted); padding: 6px 14px; border-radius: 8px; }
 .tabs button[aria-selected="true"] { background: var(--bg); color: var(--fg); }
