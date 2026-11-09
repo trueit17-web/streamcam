@@ -71,7 +71,7 @@ Xiaomi Smart Camera C701 — model chuangmi.camera.079ae2 (поддержива�
    Если туннель не устанавливается (Timeout), попробуйте `DHP2P_RELAY=1`.
 3. Добавьте камеру в `config.yaml`:
    ```yaml
-   - id: imou_dvor_p2p
+   - id: p2p_dvor
      name: Двор (P2P)
      type: dahua
      host: dhp2p
