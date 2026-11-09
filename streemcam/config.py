@@ -205,6 +205,7 @@ class Config(BaseModel):
     listen_host: str = "127.0.0.1"
     listen_port: int = 8080
     session_ttl_hours: int = 12
+    web_session_days: int = 30  # вход на сайт в браузере (кнопка Telegram или /web): сколько дней не спрашивать снова
     token_ttl_minutes: int = 10
     max_streams_per_user: int = 4
     player_mode: str = "mse"

@@ -156,8 +156,17 @@ async def run(cfg: Config) -> None:
         await asyncio.gather(*(svc.refresh() for svc in (tuya, imou) if svc is not None))
         await monitor.probe_all()
 
+    bot_username: list[str] = []
+
+    async def tg_username() -> str | None:
+        if tg_bot is None:
+            return None
+        if not bot_username:
+            bot_username.append((await tg_bot.get_me()).username)
+        return bot_username[0]
+
     app = create_app(cfg, catalog, access, monitor, access.registry, http, archive=archive,
-                     refresh_status=refresh_status)
+                     refresh_status=refresh_status, tg_username=tg_username)
     server = uvicorn.Server(uvicorn.Config(app, host=cfg.listen_host, port=cfg.listen_port,
                                            proxy_headers=True, forwarded_allow_ips="*"))
 

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>Камеры</title>
+  <link rel="stylesheet" href="/static/web.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/web" id="home-link">Камеры</a>
+    <nav class="homes" id="homes" aria-label="Дома"></nav>
+    <button class="ghost" id="logout" hidden>Выйти</button>
+  </header>
+
+  <main id="main">
+    <section id="login" class="center" hidden>
+      <h1>Камеры</h1>
+      <p class="muted">Войдите через Telegram, чтобы смотреть камеры и записи.</p>
+      <div id="tg-widget"></div>
+      <p class="muted small" id="login-alt">Или напишите боту <b>/web</b> и откройте присланную ссылку.</p>
+      <p class="error" id="login-error" hidden></p>
+    </section>
+
+    <section id="grid-view" hidden>
+      <div class="bar">
+        <h2 id="grid-title"></h2>
+        <span class="muted" id="grid-count"></span>
+        <span class="spacer"></span>
+        <button class="ghost" id="wall-toggle">Смотреть всё вживую</button>
+      </div>
+      <ul class="tiles" id="tiles"></ul>
+      <p class="muted small" id="wall-note" hidden></p>
+    </section>
+
+    <section id="cam-view" hidden>
+      <div class="bar">
+        <button class="ghost" id="back">← Назад</button>
+        <h2 id="cam-title"></h2>
+        <span class="dot" id="cam-dot"></span>
+        <span class="spacer"></span>
+        <div class="tabs" role="tablist">
+          <button role="tab" id="tab-live" aria-selected="true">Сейчас</button>
+          <button role="tab" id="tab-archive" aria-selected="false">Записи</button>
+        </div>
+      </div>
+      <div class="stage" id="stage"></div>
+      <div id="archive" hidden>
+        <div class="days" id="days"></div>
+        <div class="timeline" id="timeline"></div>
+        <div class="archive-actions">
+          <button class="ghost" id="prev-hour" title="Предыдущий час">←</button>
+          <span id="archive-label" class="muted"></span>
+          <button class="ghost" id="next-hour" title="Следующий час">→</button>
+          <span class="spacer"></span>
+          <a class="button" id="download" download hidden>Скачать</a>
+        </div>
+        <p class="muted" id="archive-empty" hidden></p>
+      </div>
+    </section>
+
+    <p class="center muted" id="message" hidden></p>
+  </main>
+  <script type="module" src="/static/web.js"></script>
+</body>
+</html>

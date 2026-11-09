@@ -6,7 +6,7 @@ from .config import Config
 from .db import Store
 from .identity import Identity
 from .streams import StreamRegistry
-from .tg_auth import TgAuthError, verify_init_data
+from .tg_auth import TgAuthError, verify_init_data, verify_login_widget
 from .tokens import TokenError, sign, verify
 
 
@@ -58,8 +58,8 @@ class Access:
             raise TokenError("link token already used")
         return self._require_allowed(Identity(payload["p"], payload["u"]))
 
-    def issue_session(self, ident: Identity) -> str:
-        exp = self._clock() + self.cfg.session_ttl_hours * 3600
+    def issue_session(self, ident: Identity, hours: float | None = None) -> str:
+        exp = self._clock() + (self.cfg.session_ttl_hours if hours is None else hours) * 3600
         return sign({"typ": "session", "p": ident.platform, "u": ident.user_id, "exp": exp},
                     self.cfg.secret)
 
@@ -73,6 +73,12 @@ class Access:
             raise TgAuthError("telegram bot is not configured")
         ident = verify_init_data(init_data, bot_token, now=self._clock())
         return self._require_allowed(ident)
+
+    def login_telegram_widget(self, fields: dict) -> Identity:
+        bot_token = self.cfg.telegram.bot_token
+        if not bot_token:
+            raise TgAuthError("telegram bot is not configured")
+        return self._require_allowed(verify_login_widget(fields, bot_token, now=self._clock()))
 
     def _require_allowed(self, ident: Identity) -> Identity:
         if not self.is_allowed(ident):

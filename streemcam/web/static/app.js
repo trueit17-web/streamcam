@@ -70,7 +70,8 @@ async function login() {
     history.replaceState(null, "", location.pathname + location.hash);
   } else {
     token = load("sc_token");
-    if (!token) showMessage("Откройте камеры через бота: /cams в Telegram или Discord.");
+    // открыли в обычном браузере без ссылки — там есть сайт со входом через Telegram
+    if (!token) location.replace("/web");
     return Boolean(token);
   }
   const data = await r.json().catch(() => ({}));

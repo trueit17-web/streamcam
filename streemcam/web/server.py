@@ -32,13 +32,13 @@ log = logging.getLogger(__name__)
 GO2RTC_JS = {"video-rtc.js", "video-stream.js"}
 STATIC_DIR = Path(__file__).parent / "static"
 ARCHIVE_CHUNK_SIZE = 64 * 1024
-VERSIONED_ASSETS = ("app.js", "style.css")
+VERSIONED_ASSETS = ("app.js", "style.css", "web.js", "web.css")
 
 
-def _index_html() -> str:
+def _index_html(page: str = "index.html") -> str:
     """index.html со ссылками на app.js/style.css вида ?v=<хеш>: WebView Telegram кеширует статику,
     и без смены адреса после деплоя открывается старый интерфейс."""
-    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    html = (STATIC_DIR / page).read_text(encoding="utf-8")
     for name in VERSIONED_ASSETS:
         digest = hashlib.sha256((STATIC_DIR / name).read_bytes()).hexdigest()[:10]
         html = html.replace(f"/static/{name}\"", f"/static/{name}?v={digest}\"")
@@ -135,9 +135,11 @@ def _denied(ident: Identity) -> JSONResponse:
 
 def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry: StreamRegistry,
                http: httpx.AsyncClient, upstream_connect=None, archive: Archive | None = None,
-               refresh_status=None) -> FastAPI:
+               refresh_status=None, tg_username=None) -> FastAPI:
+    """tg_username — async-функция, возвращающая имя бота (для кнопки «Войти через Telegram» на сайте)."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     index_html = _index_html()
+    web_html = _index_html("web.html")
     refresh_lock = asyncio.Lock()
     last_refresh: list[float] = []
     upstream_connect = upstream_connect or default_upstream(cfg.go2rtc_url)
@@ -168,14 +170,35 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
         return {"token": access.issue_session(ident)}
 
     @app.post("/api/link/redeem")
-    async def link_redeem(body: LinkIn):
+    async def link_redeem(body: LinkIn, web: int = 0):
         try:
             ident = access.redeem_link_token(body.t)
         except TokenError:
             return JSONResponse({"error": "invalid_link"}, status_code=401)
         except AccessDenied as e:
             return _denied(e.identity)
-        return {"token": access.issue_session(ident)}
+        hours = cfg.web_session_days * 24 if web else None
+        return {"token": access.issue_session(ident, hours)}
+
+    @app.get("/api/web/config")
+    async def web_config():
+        username = None
+        if tg_username is not None:
+            try:
+                username = await tg_username()
+            except Exception as e:  # бот недоступен — сайт всё равно пускает по ссылке из /web
+                log.warning("cannot get telegram bot username: %s", e)
+        return {"bot": username}
+
+    @app.post("/api/tg/widget")
+    async def tg_widget(body: dict):
+        try:
+            ident = access.login_telegram_widget(body)
+        except TgAuthError:
+            return JSONResponse({"error": "invalid_widget_data"}, status_code=401)
+        except AccessDenied as e:
+            return _denied(e.identity)
+        return {"token": access.issue_session(ident, cfg.web_session_days * 24)}
 
     def cameras_payload() -> dict:
         return {
@@ -319,6 +342,10 @@ def create_app(cfg: Config, catalog: Catalog, access: Access, monitor, registry:
     @app.get("/")
     async def index():
         return HTMLResponse(index_html, headers={"Cache-Control": "no-cache"})
+
+    @app.get("/web")
+    async def web_index():
+        return HTMLResponse(web_html, headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
