@@ -86,7 +86,7 @@ services:
     environment:
       PUID: "1000"
       PGID: "1000"
-      TZ: Europe/Moscow
+      TZ: Europe/Kyiv
       SERVERURL: ${WG_SERVER_URL:-auto}     # белый IP или домен сервера; auto — определить самому
       SERVERPORT: "51820"
       PEERS: dom1,dom2,dom3                 # по конфигу на каждый дом: wireguard/peer_domN/peer_domN.conf

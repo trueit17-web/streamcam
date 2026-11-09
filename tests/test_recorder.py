@@ -200,7 +200,7 @@ async def test_starts_in_window_creates_dirs_and_stops_outside(rcfg, tmp_path):
     await env.rec.tick()
     assert len(env.calls) == 3
     args, kwargs = env.calls[0]
-    assert kwargs["env"]["TZ"] == "Europe/Moscow"
+    assert kwargs["env"]["TZ"] == "Europe/Kyiv"
     assert kwargs["stdin"] == asyncio.subprocess.PIPE
     assert (tmp_path / "yard" / "2026-09-25").is_dir()
     assert not (tmp_path / "yard" / "2026-09-26").exists()

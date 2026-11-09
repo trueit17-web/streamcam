@@ -72,6 +72,7 @@ ids = {c["id"] for c in cams}
 names = {c["name"] for c in cams}
 unmatched = [k for k in cfg.homes if k not in ids and k not in names]
 print("homes: записей %d, не совпали ни с id, ни с названием камеры: %d" % (len(cfg.homes), len(unmatched)))
+print("часовой пояс записи: %s" % cfg.recording.timezone)
 print("imou.home задан: %s, аккаунтов imou.accounts с home: %d" % (bool(cfg.imou.home), sum(1 for a in cfg.imou.accounts if a.home)))
 ' </dev/null 2>&1 | tail -n 20 | redact
 # Imou: что внутренний API отвечает go2rtc по каждой камере (без ссылок)

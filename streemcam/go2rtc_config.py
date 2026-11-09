@@ -5,7 +5,7 @@ from urllib.parse import quote, urlencode
 import yaml
 
 from .catalog import CameraInfo
-from .config import Config, DahuaCamera, RtspCamera, XiaomiCamera
+from .config import Config, DahuaCamera, RtspCamera, TapoCamera, XiaomiCamera
 
 COMPAT_SUFFIX = "~h264"
 REC_SUFFIX = "~rec"
@@ -48,7 +48,7 @@ def rec_stream_name(cfg: Config, cam: CameraInfo) -> str | None:
     src = cfg.camera(cam.id)
     if src is None or not src.record:
         return None
-    if isinstance(src, (XiaomiCamera, DahuaCamera)):
+    if isinstance(src, (XiaomiCamera, DahuaCamera, TapoCamera)):
         return cam.id + REC_SUFFIX
     return cam.id
 
@@ -65,6 +65,11 @@ def stream_url(cam, subtype: int | None = None) -> str:
                    f"/cam/realmonitor?channel={cam.channel}&subtype={sub}")
             # через P2P-туннель (сервис dhp2p) ответ идёт через облачный relay: 5 с go2rtc по умолчанию мало
             return url + "#timeout=30" if cam.host == P2P_HOST else url
+        case TapoCamera():
+            user = quote(cam.user, safe="")
+            password = quote(cam.password, safe="")
+            sub = subtype if subtype is not None else cam.stream
+            return f"rtsp://{user}:{password}@{cam.host}:{cam.port}/stream{sub}"
         case XiaomiCamera():
             query = {"did": cam.did, "model": cam.model}
             sub = subtype if subtype is not None else cam.subtype
@@ -84,6 +89,10 @@ def render(cfg: Config, existing: dict | None) -> dict:
             continue
         if isinstance(cam, XiaomiCamera):
             streams[cam.id + REC_SUFFIX] = stream_url(cam, subtype=cam.record_subtype)
+        elif isinstance(cam, TapoCamera):
+            # тот же поток, что и для просмотра, — берём у go2rtc, без второго подключения к камере
+            streams[cam.id + REC_SUFFIX] = (f"rtsp://127.0.0.1:8554/{cam.id}" if cam.record_stream == cam.stream
+                                            else stream_url(cam, subtype=cam.record_stream))
         elif isinstance(cam, DahuaCamera):
             # основной поток уже второй (subtype 1): запись берёт его у go2rtc, а не открывает второе
             # подключение к камере (важно для P2P-туннеля dhp2p, где каждое подключение — отдельная сессия)

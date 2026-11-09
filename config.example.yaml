@@ -122,7 +122,7 @@ cameras:
 
 recording:
   enabled: true
-  timezone: Europe/Moscow
+  timezone: Europe/Kyiv
   start: "08:00"             # включительно
   end: "19:00"               # не включительно; файлы режутся по часам
   retention_days: 14

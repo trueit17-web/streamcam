@@ -6,7 +6,7 @@ from streemcam.config import RecordingConfig
 from streemcam.recording.schedule import (is_recording_time, local_now, parse_hhmm,
                                           seconds_until_change)
 
-REC = RecordingConfig()  # Europe/Moscow = UTC+3, 08:00–19:00
+REC = RecordingConfig(timezone="Europe/Moscow")  # UTC+3, 08:00–19:00
 
 
 def utc(h, m=0, s=0):

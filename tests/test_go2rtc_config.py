@@ -134,3 +134,28 @@ def test_dahua_via_p2p_tunnel_gets_longer_timeout(make_cfg, base_data):
         "rtsp://admin:p%40ss%3Aw%2Frd@dhp2p:1601/cam/realmonitor?channel=1&subtype=1#timeout=30"
     )
     assert render(cfg, None)["streams"]["gate~rec"] == "rtsp://127.0.0.1:8554/gate"
+
+
+def _tapo(**kw):
+    return {"type": "tapo", "id": "porch", "name": "Крыльцо", "host": "203.0.113.5", "port": 15541,
+            "user": "cam", "password": "p@ss", **kw}
+
+
+def test_tapo_live_hd_and_record_low(make_cfg, base_data):
+    cfg = make_cfg(cameras=base_data["cameras"] + [_tapo()])
+    data = render(cfg, None)
+    assert data["streams"]["porch"] == "rtsp://cam:p%40ss@203.0.113.5:15541/stream1"
+    assert data["streams"]["porch~rec"] == "rtsp://cam:p%40ss@203.0.113.5:15541/stream2"
+    assert rec_stream_name(cfg, CameraInfo("porch", "Крыльцо", "config")) == "porch~rec"
+
+
+def test_tapo_same_stream_records_from_go2rtc(make_cfg, base_data):
+    cfg = make_cfg(cameras=base_data["cameras"] + [_tapo(stream=2)])
+    data = render(cfg, None)
+    assert data["streams"]["porch"].endswith("/stream2")
+    assert data["streams"]["porch~rec"] == "rtsp://127.0.0.1:8554/porch"
+
+
+def test_tapo_without_record(make_cfg, base_data):
+    cfg = make_cfg(cameras=base_data["cameras"] + [_tapo(record=False)])
+    assert "porch~rec" not in render(cfg, None)["streams"]
