@@ -103,6 +103,12 @@ for name, st in streams.items():
         print(name)' </dev/null 2>/dev/null | tr -d '\r'); do
     echo "$src: $(curl -sS -m 25 -o /dev/null -w "%{http_code} %{size_download}" "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)"
   done
+  echo "== диагностика: кадр три раза подряд (код, байт, секунд)"
+  for src in p2p_dom6 p2p_dom7 p2p_dom8 p2p_dom11; do
+    for i in 1 2 3; do
+      echo "$src #$i: $(curl -sS -m 60 -o /dev/null -w "%{http_code} %{size_download} %{time_total}" "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)"
+    done
+  done
   echo "== p2p: запись (последний файл: размер, сколько секунд назад менялся)"
   now=$(date +%s)
   for d in recordings/p2p_*/; do
