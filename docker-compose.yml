@@ -72,7 +72,7 @@ services:
     environment:
       DHP2P_CAMERAS: ${DHP2P_CAMERAS:-}   # СЕРИЙНИК:ПОРТ через пробел
       DHP2P_RELAY: ${DHP2P_RELAY:-0}      # 1 — через relay-сервер, если прямое P2P не проходит
-      DHP2P_DEBUG: ${DHP2P_DEBUG:-0}      # 1 — счётчики PTCP в логе (без адресов) для отладки
+      DHP2P_DEBUG: ${DHP2P_DEBUG:-1}      # нужно: строки DBG во время рукопожатия держат 90-секундный сторож в run.sh, без них туннели рвутся
     restart: unless-stopped
 
   # WireGuard-сервер: дома (роутеры-клиенты) подключаются к нему, и go2rtc видит камеры в домашних сетях
