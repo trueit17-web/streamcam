@@ -13,6 +13,10 @@ git merge --ff-only origin/main
 echo "== стало: $(git rev-parse --short HEAD)"
 
 docker compose build go2rtc-config streemcam
+# P2P-туннели (профиль p2p): образ пересобирается, только если сервис включён
+if docker compose config --services </dev/null 2>/dev/null | grep -qx dhp2p; then
+  docker compose build dhp2p </dev/null
+fi
 # сначала проверяем config.yaml и .env, не трогая работающие контейнеры.
 # </dev/null обязателен: скрипт приходит в bash через stdin, и run иначе съест его остаток
 if ! docker compose run --rm -T --no-deps go2rtc-config \

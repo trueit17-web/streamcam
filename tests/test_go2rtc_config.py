@@ -85,7 +85,15 @@ def test_render_rec_streams_and_rtsp(cfg):
     assert data["rtsp"] == {"username": "u", "listen": ":8554"}
     assert data["streams"]["room~rec"].endswith("&subtype=1")
     assert data["streams"]["room~rec"].startswith("xiaomi://")
+    assert data["streams"]["gate~rec"] == "rtsp://127.0.0.1:8554/gate"  # уже второй поток: одно подключение
+
+
+def test_render_dahua_main_stream_rec_uses_second_stream(make_cfg, base_data):
+    cams = base_data["cameras"]
+    cams[1]["subtype"] = 0
+    data = render(make_cfg(cameras=cams), None)
     assert data["streams"]["gate~rec"].endswith("subtype=1")
+    assert data["streams"]["gate"].endswith("subtype=0")
     assert "yard~rec" not in data["streams"]  # rtsp пишется из основного потока
 
 
