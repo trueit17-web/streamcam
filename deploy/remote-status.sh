@@ -90,18 +90,16 @@ for name in sorted(n for n in streams if re.fullmatch(r"imou_[a-z0-9]+", n)):
 if docker compose ps --status running --services | grep -qx dhp2p; then
   echo "== p2p: последние строки"
   docker compose logs --since "${hours}h" --no-color dhp2p 2>&1 | tail -n 15 | redact
-  echo "== p2p: ответ RTSP камер (401 — туннель работает, нужен пароль)"
-  for item in $(docker compose exec -T dhp2p printenv DHP2P_CAMERAS </dev/null 2>/dev/null | tr ',' ' '); do
-    sn=${item%%:*}; port=${item##*:}
-    ans=$(docker compose exec -T streemcam python -c "
-import socket,sys
-try:
-    s=socket.create_connection(('dhp2p',$port),10); s.settimeout(15)
-    s.sendall(b'OPTIONS rtsp://dhp2p/cam/realmonitor?channel=1&subtype=1 RTSP/1.0\r\nCSeq: 1\r\n\r\n')
-    d=s.recv(4096); print(d.split(b'\r\n')[0].decode(errors='replace') or 'пусто')
-except Exception as e: print('ошибка', type(e).__name__)
-" </dev/null 2>&1 | tail -1)
-    echo "камера …${sn: -5} (порт $port): $ans"
+  # RTSP-запрос сюда не шлём: каждое новое подключение перезапускает P2P-сессию и рвёт запись.
+  # Вместо этого — кадр go2rtc по камерам, чей источник идёт через dhp2p (имена потоков, без адресов)
+  echo "== p2p: кадры камер через dhp2p (go2rtc /api/frame.jpeg)"
+  for src in $(docker compose exec -T streemcam python -c '
+import json, urllib.request
+streams = json.load(urllib.request.urlopen("http://go2rtc:1984/api/streams", timeout=10))
+for name, st in streams.items():
+    if any("@dhp2p:" in (p.get("url") or "") for p in (st.get("producers") or [])):
+        print(name)' </dev/null 2>/dev/null | tr -d '\r'); do
+    echo "$src: $(curl -sS -m 25 -o /dev/null -w "%{http_code} %{size_download}" "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)"
   done
 fi
 # WireGuard: сколько секунд назад каждый дом выходил на связь (без ключей и адресов — лог публичный)

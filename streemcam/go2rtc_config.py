@@ -80,7 +80,10 @@ def render(cfg: Config, existing: dict | None) -> dict:
         if isinstance(cam, XiaomiCamera):
             streams[cam.id + REC_SUFFIX] = stream_url(cam, subtype=cam.record_subtype)
         elif isinstance(cam, DahuaCamera):
-            streams[cam.id + REC_SUFFIX] = stream_url(cam, subtype=1)
+            # основной поток уже второй (subtype 1): запись берёт его у go2rtc, а не открывает второе
+            # подключение к камере (важно для P2P-туннеля dhp2p, где каждое подключение — отдельная сессия)
+            streams[cam.id + REC_SUFFIX] = (f"rtsp://127.0.0.1:8554/{cam.id}" if cam.subtype == 1
+                                            else stream_url(cam, subtype=1))
     data["streams"] = streams
     data["api"] = {**(data.get("api") or {}), "listen": cfg.go2rtc_api_listen}
     data["webrtc"] = {**(data.get("webrtc") or {}), "listen": cfg.webrtc_listen}

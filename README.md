@@ -67,8 +67,8 @@ Xiaomi Smart Camera C701 — model chuangmi.camera.079ae2 (поддержива�
 1. В `.env`: добавьте профиль `p2p` (`COMPOSE_PROFILES=caddy,p2p`), камеры
    `DHP2P_CAMERAS=7927BCCRSF84AE5:1601 C7AA8CEPSF70702:1602` (серийник:порт, порт — любой свободный)
    и пароли камер — код безопасности с наклейки: `IMOU_CAM1_PASSWORD=...`. Затем `docker compose up -d`.
-2. Проверка `status` покажет блок «p2p»: ответ `RTSP/1.0 401 Unauthorized` значит, что туннель работает.
-   Если туннель не устанавливается (Timeout), попробуйте `DHP2P_RELAY=1`.
+2. Проверка `status` покажет блок «p2p»: строка «PTCP session established» значит, что туннель работает.
+   Если туннель не устанавливается (Timeout), включите `DHP2P_RELAY=1`.
 3. Добавьте камеру в `config.yaml`:
    ```yaml
    - id: p2p_dvor
@@ -78,8 +78,11 @@ Xiaomi Smart Camera C701 — model chuangmi.camera.079ae2 (поддержива�
      port: 1601
      user: admin
      password: ${IMOU_CAM1_PASSWORD}
+     subtype: 1
    ```
-   Запись идёт со второго потока (`subtype: 1`), как у остальных камер Dahua.
+   `subtype: 1` обязателен: тогда просмотр и запись идут через одно подключение к камере. Каждое
+   подключение через P2P — отдельная сессия, и после его закрытия туннель перезапускается.
+   `id` не должен начинаться с `imou_`: этот префикс занят облачными камерами.
 
 ## Камеры Tuya / Smart Life
 1. В `config.yaml`: `tuya.enabled: true`, в `.env` — `STREEMCAM_INTERNAL_KEY`.
