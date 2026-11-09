@@ -36,3 +36,17 @@ def test_file_db_creates_parent(tmp_path):
     s = Store(str(tmp_path / "sub" / "x.db"))
     s.add_allowed(A, None)
     assert Store(str(tmp_path / "sub" / "x.db")).is_allowed(A)
+
+
+def test_store_concurrent_reads(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from streemcam.db import Store
+    from streemcam.identity import Identity
+
+    store = Store(str(tmp_path / "s.db"))
+    me = Identity("tg", 1)
+    store.add_allowed(me, None)
+    with ThreadPoolExecutor(16) as pool:
+        results = list(pool.map(lambda _: store.is_allowed(me), range(2000)))
+    assert all(results)
