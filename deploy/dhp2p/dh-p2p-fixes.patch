@@ -1,7 +1,16 @@
 diff --git a/src/main.rs b/src/main.rs
-index 5798cbf..7c8a4fb 100644
+index 5798cbf..a264c11 100644
 --- a/src/main.rs
 +++ b/src/main.rs
+@@ -10,7 +10,7 @@ use tokio::{
+ 
+ use crate::{
+     dh::p2p_handshake,
+-    process::{dh_reader, dh_writer, process_reader, process_writer},
++    process::{dh_reader, dh_writer, now_secs, process_reader, process_writer, LAST_RX},
+     ptcp::PTCPEvent,
+ };
+ 
 @@ -53,15 +53,15 @@ async fn main() {
          _ => panic!("Invalid port specification"),
      };
@@ -23,11 +32,57 @@ index 5798cbf..7c8a4fb 100644
      let (dh_tx, dh_rx) = mpsc::channel::<PTCPEvent>(128);
      let session = Arc::new(Mutex::new(session));
  
+@@ -82,9 +82,16 @@ async fn main() {
+     let conn_channels2 = conn_channels.clone();
+ 
+     let hb_tx = dh_tx.clone();
++    LAST_RX.store(now_secs(), std::sync::atomic::Ordering::Relaxed);
+     tokio::spawn(async move {
+         loop {
+             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
++            // the device answers every heartbeat: a long silence means the session is dead
++            let silent = now_secs().saturating_sub(LAST_RX.load(std::sync::atomic::Ordering::Relaxed));
++            if silent > 30 {
++                println!("Timeout: device silent for {} s, exiting", silent);
++                std::process::exit(3);
++            }
+             hb_tx.send(PTCPEvent::Heartbeat).await.unwrap();
+         }
+     });
 diff --git a/src/process.rs b/src/process.rs
-index ae5cec4..2de4e9e 100644
+index ae5cec4..dce5cb1 100644
 --- a/src/process.rs
 +++ b/src/process.rs
-@@ -18,7 +18,13 @@ pub async fn process_writer(
+@@ -1,6 +1,10 @@
+ use std::{
+     collections::HashMap,
+-    sync::{Arc, Mutex},
++    sync::{
++        atomic::{AtomicU64, Ordering},
++        Arc, Mutex,
++    },
++    time::{SystemTime, UNIX_EPOCH},
+ };
+ use tokio::{
+     io::{AsyncReadExt, AsyncWriteExt},
+@@ -10,6 +14,16 @@ use tokio::{
+ 
+ use crate::ptcp::{PTCPBody, PTCPEvent, PTCPPayload, PTCPSession, PTCP};
+ 
++/// Unix time (seconds) of the last packet received from the device
++pub static LAST_RX: AtomicU64 = AtomicU64::new(0);
++
++pub fn now_secs() -> u64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_secs())
++        .unwrap_or(0)
++}
++
+ /**
+  * Read data from the channel and write it back to the client
+  */
+@@ -18,7 +32,13 @@ pub async fn process_writer(
      mut rx: mpsc::Receiver<Vec<u8>>,
  ) {
      loop {
@@ -42,11 +97,12 @@ index ae5cec4..2de4e9e 100644
          if writer.write_all(&data).await.is_err() {
              println!("Writer: Socket closed by peer.");
              break;
-@@ -114,32 +120,43 @@ pub async fn dh_reader(
+@@ -114,32 +134,44 @@ pub async fn dh_reader(
  ) {
      loop {
          let packet = socket.ptcp_read().await;
 -        let packet = session.lock().unwrap().recv(packet);
++        LAST_RX.store(now_secs(), Ordering::Relaxed);
 +        let has_data = !matches!(packet.body, PTCPBody::Empty);
 +        let packet = session.lock().unwrap().recv_in_order(packet);
  
