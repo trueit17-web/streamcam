@@ -10,7 +10,7 @@ export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$P
 hours="${2:-1}"
 
 # логи Actions публичны: от ссылок оставляем только схему и хост
-redact() { sed -E 's#((https?|rtsps?)://[^/ "]+)[^ "]*#\1/***#g; s/(key|token|liveToken)=[^&" ]*/\1=***/g'; }
+redact() { sed -E 's#((https?|rtsps?)://[^/ "]+)[^ "]*#\1/***#g; s/(key|token|liveToken)=[^&" ]*/\1=***/g; s/\b([0-9]{1,3}\.){3}[0-9]{1,3}\b/IP/g'; }
 failed=0
 
 echo "== версия: $(git rev-parse --short HEAD) ($(git log -1 --format=%cd --date=iso))"
@@ -111,7 +111,14 @@ for name, st in streams.items():
     if [ -z "$f" ]; then echo "$(basename "$d"): файлов нет"; continue; fi
     echo "$(basename "$d"): $(echo "$f" | awk -v now="$now" '{ printf "%d КБ, %d с назад", $2/1024, now-$1 }')"
   done
+  echo "== p2p: события туннелей по 10 минутам (подключено / закрыто go2rtc / нет ответа / Not Found)"
+  docker compose logs --since "${hours}h" --no-color --timestamps dhp2p 2>&1 \
+    | awk '{ t=substr($3,12,4) "0"; if ($0 ~ /Ready to connect/) r[t]++; else if ($0 ~ /подключение закрыто/) c[t]++;
+             else if ($0 ~ /нет ответа/) n[t]++; else if ($0 ~ /Error response/) e[t]++; seen[t]=1 }
+           END { for (t in seen) printf "%s: %d / %d / %d / %d\n", t, r[t], c[t], n[t], e[t] }' | sort
 fi
+echo "== запись: сообщения streemcam за ${hours} ч"
+docker compose logs --since "${hours}h" --no-color streemcam 2>&1 | grep -E "recorder|record" | tail -n 30 | redact
 # WireGuard: сколько секунд назад каждый дом выходил на связь (без ключей и адресов — лог публичный)
 if docker compose ps --status running --services | grep -qx wireguard; then
   echo "== wireguard: последнее рукопожатие по домам"
