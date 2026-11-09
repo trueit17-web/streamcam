@@ -30,6 +30,7 @@ if curl -fsS -o /dev/null -w "%{http_code} за %{time_total} с\n" http://127.0
   failed=1
 fi
 
+echo "== сайт: /web $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/web), бот для входа: $(curl -s http://127.0.0.1:8080/api/web/config)"
 echo "== диск и память"
 df -h . recordings 2>/dev/null | uniq
 free -m
