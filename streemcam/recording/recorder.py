@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from ..catalog import Catalog
 from ..config import Config
-from ..go2rtc_config import TUYA_AUDIO_FILTER, rec_stream_name, tuya_http_input
+from ..go2rtc_config import P2P_HOST, TUYA_AUDIO_FILTER, rec_stream_name, tuya_http_input
 from .schedule import is_recording_time, local_now
 
 log = logging.getLogger(__name__)
@@ -62,6 +62,12 @@ def ffmpeg_args(input_url: str, out_dir: Path, ffmpeg: str = "ffmpeg",
     return args
 
 
+def keepalive_args(input_url: str, ffmpeg: str = "ffmpeg") -> list[str]:
+    """Читает поток и ничего не сохраняет: go2rtc держит подключение к камере открытым."""
+    return [ffmpeg, "-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-timeout", "10000000",
+            "-i", input_url, "-map", "0:v:0", "-c", "copy", "-f", "null", "-"]
+
+
 @dataclass(frozen=True)
 class RecTarget:
     cam_id: str
@@ -70,6 +76,8 @@ class RecTarget:
     audio_filter: str | None = None
     # Imou пишем без перекодирования: 2K HEVC с десятка камер перекодировать дорого
     copy_video: bool = False
+    p2p: bool = False
+    keepalive: bool = False  # вне окна записи: только держать подключение
 
 
 def targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
@@ -85,8 +93,18 @@ def targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
             else:
                 input_url = f"{cfg.recording.rtsp_url}/{stream}"
                 audio_filter = None
-            result.append(RecTarget(cam.id, cam.name, input_url, audio_filter, copy_video=cam.kind == "imou"))
+            src = cfg.camera(cam.id)
+            p2p = getattr(src, "host", None) == P2P_HOST
+            result.append(RecTarget(cam.id, cam.name, input_url, audio_filter,
+                                    copy_video=cam.kind == "imou", p2p=p2p))
     return result
+
+
+def keepalive_targets(cfg: Config, catalog: Catalog) -> list[RecTarget]:
+    if not cfg.recording.p2p_keepalive:
+        return []
+    return [RecTarget(t.cam_id, t.name, t.input_url, keepalive=True)
+            for t in targets(cfg, catalog) if t.p2p]
 
 
 @dataclass
@@ -123,7 +141,8 @@ class Recorder:
         return shutil.which(self._ffmpeg) is not None
 
     def active_cams(self) -> set[str]:
-        return {cid for cid, st in self._states.items() if st.proc is not None and st.proc.returncode is None}
+        return {cid for cid, st in self._states.items()
+                if st.proc is not None and st.proc.returncode is None and not st.target.keepalive}
 
     async def run(self) -> None:
         if not self.available():
@@ -159,10 +178,13 @@ class Recorder:
     async def tick(self) -> None:
         mono = self._clock()
         wall = self._now()
-        wanted = {t.cam_id: t for t in targets(self.cfg, self.catalog)} \
-            if is_recording_time(wall, self.cfg.recording) else {}
+        active = targets(self.cfg, self.catalog) if is_recording_time(wall, self.cfg.recording) \
+            else keepalive_targets(self.cfg, self.catalog)
+        wanted = {t.cam_id: t for t in active}
 
-        to_remove = [cam_id for cam_id in self._states if cam_id not in wanted]
+        # смена окна (запись <-> поддержание связи) меняет цель: старый процесс останавливаем
+        to_remove = [cam_id for cam_id, st in self._states.items()
+                     if cam_id not in wanted or wanted[cam_id].keepalive != st.target.keepalive]
         if to_remove:
             await asyncio.gather(*(self._stop(self._states[cam_id]) for cam_id in to_remove))
             for cam_id in to_remove:
@@ -195,6 +217,12 @@ class Recorder:
                     st.down_since = mono
 
     async def _start(self, st: _State, wall: datetime, mono: float) -> None:
+        if st.target.keepalive:
+            st.proc = await self._spawn(*keepalive_args(st.target.input_url, self._ffmpeg),
+                                        stdin=asyncio.subprocess.PIPE,
+                                        stdout=asyncio.subprocess.DEVNULL)
+            st.started_at = mono
+            return
         out_dir = self._root / st.target.cam_id
         local = local_now(wall, self.cfg.recording)
         (out_dir / local.strftime("%Y-%m-%d")).mkdir(parents=True, exist_ok=True)
@@ -231,6 +259,11 @@ class Recorder:
         return (self._wall_clock() - newest_mtime) >= STALL_SECONDS
 
     async def _check_health(self, st: _State, mono: float, wall: datetime) -> None:
+        if st.target.keepalive:
+            # файлов нет: следим только за перезапуском упавшего процесса, без уведомлений
+            if st.proc is not None and st.proc.returncode is None and mono - st.started_at >= HEALTHY_AFTER_SECONDS:
+                st.failures = 0
+            return
         if self._is_stalled(st, mono, wall):
             log.warning("recorder for %s stalled (no fresh output for %ss), restarting",
                         st.target.cam_id, STALL_SECONDS)
