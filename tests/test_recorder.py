@@ -385,3 +385,41 @@ async def test_slow_alert_does_not_block(make_cfg, tmp_path, monkeypatch):
 
     env.rec._on_alert = stuck
     await asyncio.wait_for(env.rec._alert("x"), 1)
+
+
+async def test_p2p_camera_kept_connected_outside_window(make_cfg, tmp_path):
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path)},
+                   cameras=[{"id": "p2p_a", "name": "A", "type": "dahua", "host": "dhp2p", "port": 1601,
+                             "user": "admin", "password": "x"},
+                            {"id": "yard", "name": "Двор", "type": "rtsp", "url": "rtsp://x"}])
+    env = Env(cfg, Catalog(cfg))
+    env.wall = datetime(2026, 9, 25, 20, 0, tzinfo=timezone.utc)   # вне окна
+    await env.rec.tick()
+    assert len(env.calls) == 1
+    args, kwargs = env.calls[0]
+    assert args[-3:] == ("-f", "null", "-") and "p2p_a" in " ".join(args)
+    assert "env" not in kwargs
+    assert env.rec.active_cams() == set()          # это не запись
+    assert not (tmp_path / "p2p_a").exists()
+
+    env.procs[0].returncode = 1                    # упал — перезапускаем, без уведомлений
+    await env.rec.tick()                           # заметили выход, ждём паузу
+    env.mono += 60
+    await env.rec.tick()
+    assert len(env.calls) == 2 and env.alerts == []
+
+    env.wall = datetime(2026, 9, 26, 6, 0, tzinfo=timezone.utc)    # 09:00 по Киеву — окно записи
+    await env.rec.tick()
+    assert env.procs[1].stdin.data == b"q\n"       # поддержание связи остановлено
+    started = [" ".join(a) for a, _ in env.calls[2:]]
+    assert len(started) == 2 and all("segment" in s for s in started)
+
+
+async def test_p2p_keepalive_can_be_disabled(make_cfg, tmp_path):
+    cfg = make_cfg(recording={"enabled": True, "path": str(tmp_path), "p2p_keepalive": False},
+                   cameras=[{"id": "p2p_a", "name": "A", "type": "dahua", "host": "dhp2p", "port": 1601,
+                             "user": "admin", "password": "x"}])
+    env = Env(cfg, Catalog(cfg))
+    env.wall = datetime(2026, 9, 25, 20, 0, tzinfo=timezone.utc)
+    await env.rec.tick()
+    assert env.calls == []

@@ -158,6 +158,9 @@ class RecordingConfig(BaseModel):
     tuya: bool = True
     imou: bool = True
     alert_minutes: int = 10
+    # камеры через P2P-туннель (host: dhp2p) вне окна записи держим подключёнными без сохранения:
+    # туннель обслуживает одно подключение и после каждого снимка долго переподключается
+    p2p_keepalive: bool = True
 
     @field_validator("start", "end")
     @classmethod
