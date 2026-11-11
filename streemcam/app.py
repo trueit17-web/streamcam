@@ -202,6 +202,11 @@ async def run(cfg: Config) -> None:
         background.append(asyncio.create_task(supervise("recorder", recorder.run)))
         background.append(asyncio.create_task(
             supervise("archive-cleanup", lambda: cleanup_forever(archive, cfg, 3600))))
+        from .recording.merge import HourMerger
+        from .recording.schedule import local_now
+        merger = HourMerger(Path(cfg.recording.path))
+        background.append(asyncio.create_task(supervise(
+            "hour-merge", lambda: merger.run(lambda: local_now(datetime.now(timezone.utc), cfg.recording)))))
 
     try:
         await server.serve()
