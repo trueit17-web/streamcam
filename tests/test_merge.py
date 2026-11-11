@@ -88,3 +88,27 @@ def test_hour_groups_ignores_foreign_files(tmp_path):
     (tmp_path / "notes.mp4").write_bytes(b"x")
     assert list(hour_groups(tmp_path)) == [10]
     assert len(hour_groups(tmp_path)[10]) == 1
+
+
+async def test_empty_piece_does_not_block_merge(tmp_path):
+    day = tmp_path / "cam1" / "2026-11-11"
+    make_piece(day / "10-00-00.mp4", 2)
+    broken = day / "10-20-00.mp4"
+    broken.write_bytes(b"\x00" * 100)
+    old = time.time() - 600
+    os.utime(broken, (old, old))
+    make_piece(day / "10-40-00.mp4", 2)
+    assert await HourMerger(tmp_path).merge_pending(NOW) == 1
+    assert [f.name for f in day.glob("*.mp4")] == ["10-00-00.mp4"]
+    assert duration(day / "10-00-00.mp4") == pytest.approx(4, abs=0.5)
+
+
+async def test_single_good_piece_with_empty_one(tmp_path):
+    day = tmp_path / "cam1" / "2026-11-11"
+    make_piece(day / "10-00-00.mp4", 2)
+    broken = day / "10-20-00.mp4"
+    broken.write_bytes(b"")
+    old = time.time() - 600
+    os.utime(broken, (old, old))
+    assert await HourMerger(tmp_path).merge_pending(NOW) == 1
+    assert [f.name for f in day.glob("*.mp4")] == ["10-00-00.mp4"]

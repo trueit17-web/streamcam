@@ -111,10 +111,21 @@ class HourMerger:
         key = tuple(str(p) for p in pieces)
         layouts = [await self._layout(p) for p in pieces]
         usable = [(p, lay) for p, lay in zip(pieces, layouts) if lay is not None]
-        if len(usable) < 2 or any(lay != usable[0][1] for _, lay in usable):
-            log.warning("cannot merge %s: pieces differ or are unreadable", key)
+        if any(lay != usable[0][1] for _, lay in usable):
+            log.warning("cannot merge %s: pieces differ", key)
             self._skip.add(key)
             return False
+        # кусок без читаемого видео (камера отвалилась сразу после подключения) смотреть нечего
+        empty = [p for p, lay in zip(pieces, layouts) if lay is None]
+        if len(usable) < 2:
+            if not usable:
+                self._skip.add(key)
+                return False
+            for p in empty:
+                p.unlink(missing_ok=True)
+            log.info("removed %d empty pieces next to %s", len(empty), usable[0][0])
+            return True
+        pieces = [p for p, _ in usable]
         target = pieces[0]
         tmp = target.with_name(target.stem + TMP_SUFFIX)
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as lst:
@@ -136,7 +147,7 @@ class HourMerger:
         last_mtime = max(p.stat().st_mtime for p in pieces)
         os.utime(tmp, (last_mtime, last_mtime))
         os.replace(tmp, target)
-        for p in pieces[1:]:
+        for p in pieces[1:] + empty:
             p.unlink(missing_ok=True)
         log.info("merged %d pieces into %s", len(pieces), target)
         return True
