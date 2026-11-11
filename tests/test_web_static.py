@@ -9,7 +9,9 @@ def test_index_and_assets(web):
     assert "telegram-web-app.js" in r.text
     js = client.get("/static/app.js")
     assert js.status_code == 200
-    assert "/go2rtc/video-stream.js" in js.text
+    assert "/static/player.js" in js.text
+    player = client.get("/static/player.js")
+    assert player.status_code == 200 and "/go2rtc/video-rtc.js" in player.text
     assert client.get("/static/style.css").status_code == 200
 
 
