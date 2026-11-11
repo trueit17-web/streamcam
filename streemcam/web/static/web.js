@@ -1,5 +1,5 @@
 // Сайт для браузера: дома → камеры → живое видео и записи. Вход: кнопка Telegram или ссылка от бота (/web).
-import "/go2rtc/video-stream.js";
+import "/static/player.js";
 
 const $ = (sel) => document.querySelector(sel);
 const TOKEN_KEY = "scw_token";
@@ -205,6 +205,7 @@ function stopPlayers(root) {
 
 function livePlayer(cam) {
   const v = document.createElement("video-stream");
+  v.setAttribute("poster", snapshotUrl(cam.id)); // пока ждём видео — последний снимок
   v.mode = info.player_mode;
   v.src = streamUrl(cam.id);
   const mute = () => { if (v.video) v.video.muted = true; };

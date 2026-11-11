@@ -1,4 +1,4 @@
-import "/go2rtc/video-stream.js";
+import "/static/player.js";
 
 const $ = (sel) => document.querySelector(sel);
 const tg = window.Telegram?.WebApp;
@@ -169,6 +169,7 @@ function playInlineCard(li, cam) {
   if (li.querySelector("video-stream")) return; // уже играет — повторный клик по видео не перезапускает
   const img = li.querySelector("img");
   const video = document.createElement("video-stream");
+  video.setAttribute("poster", snapshotUrl(cam.id));
   video.className = "card-video";
   video.mode = info.player_mode;
   video.src = streamUrl(cam.id);
@@ -355,6 +356,7 @@ function player(cam) {
   const box = document.createElement("div");
   box.className = "player";
   const video = document.createElement("video-stream");
+  video.setAttribute("poster", snapshotUrl(cam.id));
   video.mode = info.player_mode;
   video.src = streamUrl(cam.id);
   const bar = document.createElement("div");
