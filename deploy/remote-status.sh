@@ -103,7 +103,7 @@ for name, st in streams.items():
         print(name)' </dev/null 2>/dev/null | tr -d '\r'); do
     echo "$src: $(curl -sS -m 25 -o /dev/null -w "%{http_code} %{size_download}" "http://127.0.0.1:1984/api/frame.jpeg?src=$src" </dev/null 2>&1)"
   done
-  echo "== p2p: поток для просмотра за 10 с (кодек, размер, к/с, первый ключевой кадр, интервал ключевых, макс. пауза, кбит/с)"
+  echo "== p2p: поток для просмотра за 10 с (первый ключевой кадр, интервал ключевых, макс. пауза, кбит/с)"
   docker compose exec -T streemcam python -c '
 import json, subprocess, threading, time, urllib.request
 streams = json.load(urllib.request.urlopen("http://go2rtc:1984/api/streams", timeout=10))
@@ -136,8 +136,7 @@ def probe(name):
     timer.cancel()
     gi = "%.1f с" % ((keys[-1] - keys[0]) / (len(keys) - 1)) if len(keys) > 1 else "-"
     fk = "%.1f с" % firstkey if firstkey is not None else "нет"
-    out[name] = "%s; ключевой через %s; интервал %s; пауза %.1f с; %d кбит/с" % (
-        info, fk, gi, gap, size * 8 / 1000 / 10)
+    out[name] = "ключевой через %s; интервал %s; пауза %.1f с; %d кбит/с" % (fk, gi, gap, size * 8 / 1000 / 10)
 ts = [threading.Thread(target=probe, args=(n,)) for n in names]
 for t in ts: t.start()
 for t in ts: t.join()
