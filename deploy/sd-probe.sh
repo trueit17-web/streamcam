@@ -182,8 +182,80 @@ def http_probe():
             print(f"  HTTP {path.split('?')[0]}: ошибка {type(e).__name__}: {clean(str(e))[:150]}")
             return
 
+def dhip_probe():
+    import struct
+    s = socket.create_connection(("dhp2p", pp), timeout=20)
+    state = {"id": 0, "session": 0}
+    def recv_exact(n):
+        b = b""
+        while len(b) < n:
+            c = s.recv(n - len(b))
+            if not c:
+                raise ConnectionError("камера закрыла соединение")
+            b += c
+        return b
+    def call(method, params=None, obj=None):
+        state["id"] += 1
+        msg = {"method": method, "params": params, "id": state["id"], "session": state["session"]}
+        if obj is not None:
+            msg["object"] = obj
+        data = json.dumps(msg).encode()
+        hdr = struct.pack("<I", 0x20000000) + b"DHIP" + struct.pack("<IIIIII", state["session"], state["id"],
+                                                                     len(data), 0, len(data), 0)
+        s.sendall(hdr + data)
+        while True:
+            h = recv_exact(32)
+            ln = struct.unpack("<I", h[16:20])[0]
+            body = recv_exact(ln)
+            try:
+                return json.loads(body.decode(errors="replace").rstrip("\x00"))
+            except ValueError:
+                continue
+    r = call("global.login", {"userName": user, "password": "", "clientType": "Web3.0", "loginType": "Direct"})
+    state["session"] = r.get("session", 0)
+    prm = r.get("params") or {}
+    print(f"  DHIP вызов входа: ответ есть, error={r.get('error')}, encryption={prm.get('encryption')}")
+    realm, rnd = prm.get("realm"), prm.get("random")
+    if not realm:
+        return
+    md5 = lambda x: hashlib.md5(x.encode()).hexdigest().upper()
+    pwd = md5(f"{user}:{rnd}:{md5(f'{user}:{realm}:{pw}')}")
+    r = call("global.login", {"userName": user, "password": pwd, "clientType": "Web3.0", "loginType": "Direct",
+                              "authorityType": prm.get("encryption", "Default")})
+    print(f"  DHIP вход: result={r.get('result')}, error={r.get('error')}")
+    if not r.get("result"):
+        return
+    state["session"] = r.get("session", state["session"])
+    r = call("mediaFileFind.factory.create")
+    obj = r.get("result")
+    print(f"  mediaFileFind.factory.create: {obj!r} error={r.get('error')}")
+    if not obj:
+        return
+    day0 = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+    cond = {"condition": {"Channel": 0, "Dirs": ["/mnt/sd"], "Types": ["dav"],
+                          "StartTime": day0.strftime("%Y-%m-%d %H:%M:%S"),
+                          "EndTime": datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S"),
+                          "VideoStream": "Main"}}
+    r = call("mediaFileFind.findFile", cond, obj)
+    print(f"  mediaFileFind.findFile: result={r.get('result')} error={r.get('error')}")
+    if not r.get("result"):
+        cond["condition"].pop("Dirs"); cond["condition"].pop("VideoStream")
+        r = call("mediaFileFind.findFile", cond, obj)
+        print(f"  mediaFileFind.findFile (без Dirs): result={r.get('result')} error={r.get('error')}")
+    r = call("mediaFileFind.findNextFile", {"count": 100}, obj)
+    infos = (r.get("params") or {}).get("infos") or []
+    print(f"  записей на карте за сегодня: {(r.get('params') or {}).get('found')} (получено {len(infos)}), error={r.get('error')}")
+    for i in infos[:3] + infos[-2:]:
+        print("   ", {k: i.get(k) for k in ("StartTime", "EndTime", "Length", "Type", "Events", "FilePath", "VideoStream")})
+    call("mediaFileFind.close", None, obj)
+    call("mediaFileFind.destroy", None, obj)
+    s.close()
+
 print(f"  интервал записи (время камеры): {start.strftime('%H:%M:%S')}–{end.strftime('%H:%M:%S')}")
-{"rtsp": rtsp_describe_all, "play": ffmpeg_play, "http": http_probe}[mode]()
+try:
+    {"rtsp": rtsp_describe_all, "play": ffmpeg_play, "http": http_probe, "dhip": dhip_probe}[mode]()
+except Exception as e:
+    print(f"  ошибка {type(e).__name__}: {clean(str(e))[:200]}")
 PY
 }
 
@@ -194,14 +266,13 @@ while read -r _ cam_id port <&3; do
   done
   if [ -z "$serial" ]; then echo "$cam_id: порт $port не найден в DHP2P_CAMERAS"; continue; fi
   pp=$((port + 300))
-  echo "== sd: $cam_id — RTSP-запросы (живой поток и запись с карты)"
-  if tunnel_up "$pp" 554 "$serial"; then probe rtsp "$cam_id" "$pp"; fi
-  tunnel_log "$pp"
-  echo "== sd: $cam_id — скачивание 30 с записи с карты (ffmpeg)"
-  if tunnel_up "$pp" 554 "$serial"; then probe play "$cam_id" "$pp"; fi
-  tunnel_log "$pp"
-  echo "== sd: $cam_id — HTTP API камеры (порт 80)"
-  if tunnel_up "$pp" 80 "$serial"; then probe http "$cam_id" "$pp"; fi
+  if [ "${SD_MODES:-dhip}" != dhip ]; then
+    echo "== sd: $cam_id — RTSP-запросы (живой поток и запись с карты)"
+    if tunnel_up "$pp" 554 "$serial"; then probe rtsp "$cam_id" "$pp"; fi
+    tunnel_log "$pp"
+  fi
+  echo "== sd: $cam_id — фирменный протокол Dahua (порт 37777): вход и список записей на карте"
+  if tunnel_up "$pp" 37777 "$serial"; then probe dhip "$cam_id" "$pp"; fi
   tunnel_log "$pp"
   tunnel_down "$pp"
 done 3< <(echo "$found" | grep "^CAM ")
