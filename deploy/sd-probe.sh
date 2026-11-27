@@ -18,14 +18,19 @@ relay=()
 
 # id и порт туннеля камер с указанными именами
 found=$(docker compose exec -T -e SD_NAMES="$names" streemcam python - <<'PY'
-import os
+import os, re
 from streemcam.config import load_config
 cfg = load_config("/app/config.yaml")
-want = [n.strip().casefold() for n in os.environ["SD_NAMES"].split(",") if n.strip()]
+LAT = str.maketrans("acekmhoptxyb", "асекмнортхуь")
+def norm(s):
+    return re.sub(r"[^0-9a-zа-яё]", "", (s or "").casefold().translate(LAT))
+want = [n for n in os.environ["SD_NAMES"].split(",") if n.strip()]
 for n in want:
-    hits = [c for c in cfg.cameras if c.name.strip().casefold() == n]
+    q = norm(n)
+    hits = [c for c in cfg.cameras if norm(c.name) == q] or \
+           [c for c in cfg.cameras if q and (q in norm(c.name) or q in norm(c.id))]
     if not hits:
-        print(f"MISS {n}")
+        print(f"MISS {n.strip()}")
     for c in hits:
         if getattr(c, "host", None) != "dhp2p":
             print(f"NOTP2P {c.id}")
@@ -35,6 +40,16 @@ PY
 )
 
 echo "$found" | grep -E "^(MISS|NOTP2P)" | sed 's/^MISS/нет камеры с именем:/; s/^NOTP2P/не через dhp2p:/'
+if echo "$found" | grep -q "^MISS"; then
+  echo "камеры через dhp2p (id — название — дом):"
+  docker compose exec -T streemcam python -c '
+from streemcam.config import load_config
+for c in load_config("/app/config.yaml").cameras:
+    if getattr(c, "host", None) == "dhp2p":
+        print(c.id, "—", c.name, "—", c.home or "-")
+'
+fi
+echo "$found" | grep "^CAM " | sed 's/^CAM /проверяю: /'
 
 while read -r _ cam_id port <&3; do
   serial=""
