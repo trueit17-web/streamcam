@@ -10,6 +10,9 @@ on:
       hours:
         description: "За сколько часов показать ошибки в логах"
         default: "1"
+      sd_probe:
+        description: "Проверить запись с карты памяти: имена камер через запятую (пусто — не проверять)"
+        default: ""
 
 concurrency:
   group: prod-status
@@ -18,7 +21,7 @@ concurrency:
 jobs:
   status:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       HOST: ${{ secrets.PROD_SSH_HOST }}
       PORT: ${{ secrets.PROD_SSH_PORT || '22' }}
@@ -55,3 +58,13 @@ jobs:
           case "$HOURS" in ''|*[!0-9]*) echo "hours должно быть числом" >&2; exit 1;; esac
           ssh -i ~/.ssh/id_prod -p "$PORT" -o StrictHostKeyChecking=yes "$USER_NAME@$HOST" \
             "bash -s -- '$DEPLOY_PATH' '$HOURS'" < deploy/remote-status.sh
+
+      - name: Проверка записи с карты памяти
+        if: always() && steps.ssh.outputs.skip != 'true' && inputs.sd_probe != ''
+        env:
+          SD_PROBE: ${{ inputs.sd_probe }}
+        run: |
+          script=$(base64 -w0 deploy/sd-probe.sh)
+          names=$(printf '%s' "$SD_PROBE" | base64 -w0)
+          ssh -i ~/.ssh/id_prod -p "$PORT" -o StrictHostKeyChecking=yes "$USER_NAME@$HOST" \
+            "cd '$DEPLOY_PATH' && echo $script | base64 -d > /tmp/sd-probe.sh && bash /tmp/sd-probe.sh \"\$(echo $names | base64 -d)\"; rm -f /tmp/sd-probe.sh" </dev/null
