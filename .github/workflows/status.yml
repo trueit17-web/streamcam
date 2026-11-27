@@ -15,7 +15,7 @@ on:
         default: ""
 
 concurrency:
-  group: prod-status
+  group: prod-status${{ inputs.sd_probe != '' && inputs.sd_probe != null && '-sd' || '' }}
   cancel-in-progress: true
 
 jobs:
